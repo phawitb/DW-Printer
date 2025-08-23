@@ -39,6 +39,10 @@ def serve_index():
     if os.path.exists(file_path):
         return FileResponse(file_path, media_type="text/html")
     return {"error": "index.html not found"}
+# Optional: redirect root `/` to index.html
+@app.get("/")
+def root():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "index.html"))
     
 # ================= QR ===================
 @app.get("/generate_qr")
