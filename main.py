@@ -32,6 +32,14 @@ app.add_middleware(
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# === Serve index.html directly ===
+@app.get("/index.html")
+def serve_index():
+    file_path = os.path.join(os.path.dirname(__file__), "index.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type="text/html")
+    return {"error": "index.html not found"}
+    
 # ================= QR ===================
 @app.get("/generate_qr")
 def generate_qr(amount: float = Query(..., gt=0, description="จำนวนเงิน (บาท)")):
