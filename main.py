@@ -16,7 +16,7 @@ from promptpay import qrcode
 FIXED_PROMPTPAY_NUMBER = "0805471749"
 LINE_CHANNEL_SECRET = 'e48db91970c8ff61adee8f9360abeae1'
 LINE_CHANNEL_ACCESS_TOKEN = "JEPIUJhhospgCynVPo8Rx7iwrbyvF81Ux29xLQ/mZadS3NiHX07HBYgBz1/eHdiXwbQ6hmxCg0M1A50mR7BCWUMzfWIo3JlUtpQDVj+WE1iVP4BN4RWIrV8Q77PiB14r/HlD4eY+wAkPVDxmUHqNnAdB04t89/1O/w1cDnyilFU="
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://your-domain.onrender.com")
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://dw-printer-1.onrender.com")
 
 app = FastAPI()
 
