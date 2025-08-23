@@ -32,6 +32,43 @@ app.add_middleware(
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
+# === Auto-Clean Config ===
+MAX_DISK_USAGE_MB = 500
+PDF_DIR = "pdfs"
+
+def cleanup_pdfs():
+    """ลบไฟล์ PDF เก่าที่สุดถ้าใช้พื้นที่เกิน MAX_DISK_USAGE_MB"""
+    total_size = 0
+    file_list = []
+
+    for root, _, files in os.walk(PDF_DIR):
+        for f in files:
+            if f.lower().endswith(".pdf"):
+                path = os.path.join(root, f)
+                try:
+                    size = os.path.getsize(path)
+                    mtime = os.path.getmtime(path)
+                    total_size += size
+                    file_list.append((path, size, mtime))
+                except Exception as e:
+                    print(f"⚠️ อ่านไฟล์ {path} ไม่ได้: {e}")
+
+    total_mb = total_size / (1024 * 1024)
+    print(f"📂 ขนาดโฟลเดอร์ PDF: {total_mb:.2f} MB")
+
+    if total_mb > MAX_DISK_USAGE_MB:
+        # sort ไฟล์ตามเวลาแก้ไข (เก่าสุดก่อน)
+        file_list.sort(key=lambda x: x[2])
+
+        while total_mb > MAX_DISK_USAGE_MB and file_list:
+            path, size, _ = file_list.pop(0)
+            try:
+                os.remove(path)
+                total_mb -= size / (1024 * 1024)
+                print(f"🗑 ลบไฟล์: {path}")
+            except Exception as e:
+                print(f"⚠️ ลบไฟล์ {path} ไม่ได้: {e}")
+
 # === Serve index.html directly ===
 @app.get("/index.html")
 def serve_index():
@@ -39,11 +76,12 @@ def serve_index():
     if os.path.exists(file_path):
         return FileResponse(file_path, media_type="text/html")
     return {"error": "index.html not found"}
+
 # Optional: redirect root `/` to index.html
 @app.get("/")
 def root():
     return FileResponse(os.path.join(os.path.dirname(__file__), "index.html"))
-    
+
 # ================= QR ===================
 @app.get("/generate_qr")
 def generate_qr(amount: float = Query(..., gt=0, description="จำนวนเงิน (บาท)")):
@@ -183,6 +221,9 @@ def handle_file_message(event):
     file_content = line_bot_api.get_message_content(message_id).content
     with open(save_path, 'wb') as f:
         f.write(file_content)
+
+    # 🔹 เรียก auto-clean หลังบันทึกไฟล์
+    cleanup_pdfs()
 
     # file list
     all_files = [f for f in os.listdir(user_dir) if f.lower().endswith(".pdf")]
