@@ -5,7 +5,7 @@ import json
 # For local testing:
 # api_url = "http://127.0.0.1:8000/pay_completed"
 # For a deployed app (e.g., on Render):
-api_url = "https://283d6329f959.ngrok-free.app/pay_completed"
+api_url = "https://dw-printer-lts.onrender.com/pay_completed"
 
 # Replace 'your_reference_id' with the actual ref_id of a payment document
 # from your MongoDB, which currently has a status of "waiting".
