@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+line-bot-sdk
+pdf2image
+Pillow
+PyPDF2
+promptpay
+python-multipart
