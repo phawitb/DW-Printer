@@ -31,6 +31,11 @@ FRONTEND_BASE_URL = cfg["API_BASE"]
 MONGO_URL = cfg["MONGO_URL"]
 DB_NAME = "dimonwall"
 
+print('LINE_CHANNEL_SECRET',LINE_CHANNEL_SECRET)
+print('LINE_CHANNEL_ACCESS_TOKEN',LINE_CHANNEL_ACCESS_TOKEN)
+print('FRONTEND_BASE_URL',FRONTEND_BASE_URL)
+print('MONGO_URL',MONGO_URL)
+
 client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
 collection_printer = db["printers"]
