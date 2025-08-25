@@ -1,5 +1,5 @@
 {
-    "API_BASE": "https://acebb428abfb.ngrok-free.app",
+    "API_BASE": "https://dw-printer-lts.onrender.com",
     "LIFF_ID": "2007983323-BlxkXqZ7",
     "MONGO_URL": "mongodb+srv://phawitboo:JO3hoCXWCSXECrGB@cluster0.fvc5db5.mongodb.net",
     "FRONTEND_BASE_URL": "https://deep-printer-lts.onrender.com",
