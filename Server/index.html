@@ -466,7 +466,8 @@
 
           refreshPDFOptions();
         } else {
-          listDiv.innerHTML = `<p class='text-red-600 text-center'>${langData.noFiles}</p>`;
+          listDiv.innerHTML = `<p class="text-red-600 text-center font-semibold whitespace-pre-line">${langData.noFiles}</p>`;
+          // listDiv.innerHTML = `<p class='text-red-600 text-center'>${langData.noFiles}</p>`;
         }
       } catch (err) {
         document.getElementById("pdf-list").innerHTML = `<p class='text-red-600 text-center'>${langData.loadingFailed}: ${err}</p>`;
