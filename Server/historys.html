@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DeepPrinter - History</title>
+  <!-- LIFF SDK -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,6 +21,10 @@
     .status-paid { background-color: #FDE68A; color: #92400E; }      /* เหลืองเข้ม */
     .status-printing { background-color: #DBEAFE; color: #1E40AF; }  /* น้ำเงินอ่อน */
     .status-waiting { background-color: #FEF3C7; color: #92400E; }   /* เหลืองอ่อน */
+    .status-cancelled { background-color: #FEF3C7; color: #92400E; } /* เหลือง */
+    .status-uploadfail { background-color: #FEE2E2; color: #991B1B; }/* แดง */
+    .status-printingfail { background-color: #FEE2E2; color: #991B1B; }/* แดง */
+    .status-finished { background-color: #D1FAE5; color: #065F46; }  /* เขียว */
     .label { font-size: 0.85rem; font-weight: 400; color: #374151; }
     .value { font-size: 0.9rem; color: #1f2937; }
     .ref-id { word-break: break-all; font-size: 0.8rem; color: #6b7280; }
@@ -40,15 +46,33 @@
   </div>
 
   <div class="fixed-footer flex items-center justify-center">
-    <a id="back-link" class="text-blue-600 text-base font-medium hover:text-blue-800">
+    <a id="back-link" href="index.html" class="text-blue-600 text-base font-medium hover:text-blue-800">
       กลับสู่หน้าหลัก
     </a>
   </div>
 
   <script>
-    const API_BASE = "https://dw-printer-lts.onrender.com";
-    let isThai = true;
+    // ===== CONFIG =====
+    let API_BASE = "";
+    let LIFF_ID  = "";
 
+    async function loadConfig() {
+      const res = await fetch("/static/config.json", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching /static/config.json`);
+      const cfg = await res.json();
+      API_BASE = cfg.API_BASE;
+      LIFF_ID  = cfg.LIFF_ID;
+      console.log("✅ config loaded:", cfg);
+    }
+
+    // const API_BASE = "https://acebb428abfb.ngrok-free.app"; // เปลี่ยนตามจริงได้
+    // const LIFF_ID  = "2007983323-BlxkXqZ7"; // TODO: ใส่ LIFF ID จริงของโปรเจกต์
+
+    // ===== STATE =====
+    let isThai = true;
+    let lineId = null;
+
+    // ===== I18N =====
     const translations = {
       th: {
         title: "ประวัติการพิมพ์",
@@ -77,7 +101,11 @@
         failed: "ล้มเหลว",
         paid: "ชำระเงินแล้ว",
         printing: "กำลังพิมพ์",
-        waiting: "รอการชำระเงิน"
+        waiting: "รอการชำระเงิน",
+        cancelled: "ยกเลิก",
+        uploadfail: "อัปโหลดล้มเหลว",
+        printingfail: "พิมพ์ล้มเหลว",
+        finished: "เสร็จสิ้น"
       },
       en: {
         title: "Print History",
@@ -106,53 +134,84 @@
         failed: "Failed",
         paid: "Paid",
         printing: "Printing",
-        waiting: "Waiting for Payment"
+        waiting: "Waiting for Payment",
+        cancelled: "Cancelled",
+        uploadfail: "Upload Failed",
+        printingfail: "Printing Failed",
+        finished: "Finished"
       }
     };
 
-    function getLineIdFromURL() {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("uid");
+    // ===== LIFF =====
+    async function getLineUserIdViaLIFF() {
+      try {
+
+        await loadConfig();
+
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login();
+          return null;
+        }
+        const profile = await liff.getProfile();
+        return profile.userId;
+      } catch (err) {
+        console.error("LIFF init/profile error:", err);
+        return null;
+      }
     }
 
+    // ===== UTIL =====
     function formatDate(isoString) {
       if (!isoString) return "-";
-      const date = new Date(isoString);
-      const bangkokDate = new Date(date.getTime() + (7 * 60 * 60 * 1000));
-      return bangkokDate.toLocaleString(isThai ? 'th-TH' : 'en-US', {
-        year: 'numeric', month: 'short', day: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
+      // แปลงเวลาเป็นโซนเอเชีย/กรุงเทพฯ โดยไม่บวกมือ
+      try {
+        return new Date(isoString).toLocaleString(isThai ? 'th-TH' : 'en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'Asia/Bangkok'
+        });
+      } catch {
+        return "-";
+      }
     }
 
     function getStatusText(status) {
       const langData = translations[isThai ? 'th' : 'en'];
       if (!status) return "-";
       const normalized = status.toString().trim().toLowerCase();
-      switch(normalized) {
+      switch (normalized) {
         case 'completed': return langData.completed;
         case 'pending': return langData.pending;
         case 'failed': return langData.failed;
         case 'paid': return langData.paid;
         case 'printing': return langData.printing;
         case 'waiting': return langData.waiting;
+        case 'cancelled': return langData.cancelled;
+        case 'uploadfail': return langData.uploadfail;
+        case 'printingfail': return langData.printingfail;
+        case 'finished': return langData.finished;
         default: return status;
       }
     }
 
-    async function loadPrintHistory(lineId) {
+    // ===== RENDER =====
+    async function loadPrintHistory(lineUserId) {
       const listDiv = document.getElementById("history-list");
       const langData = translations[isThai ? 'th' : 'en'];
       listDiv.innerHTML = `<p class="text-center text-gray-500 text-sm">${langData.loading}</p>`;
 
       try {
-        const res = await fetch(`${API_BASE}/get_payment_history/${lineId}`);
+        const res = await fetch(`${API_BASE}/get_payment_history/${lineUserId}`);
         if (!res.ok) throw new Error("API call failed");
         const data = await res.json();
 
         listDiv.innerHTML = "";
         if (data.history && data.history.length > 0) {
-          // ✅ เรียงตาม created_at จากล่าสุด → เก่าสุด
+          // เรียงตาม created_at จากล่าสุด → เก่าสุด
           data.history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
           data.history.forEach(item => {
@@ -177,8 +236,8 @@
               }).join("");
             }
 
-            const refDisplay = item.ref_id 
-              ? item.ref_id.substring(0, 8) + "..." + item.ref_id.slice(-6) 
+            const refDisplay = item.ref_id
+              ? item.ref_id.substring(0, 8) + "..." + item.ref_id.slice(-6)
               : "-";
 
             const card = document.createElement("div");
@@ -215,24 +274,34 @@
       document.getElementById('page-title').textContent = langData.title;
       document.querySelector('#lang-text').textContent = lang.toUpperCase();
       document.getElementById('back-link').textContent = langData.back;
-      const lineId = getLineIdFromURL();
-      if(lineId) loadPrintHistory(lineId);
+
+      // ถ้ามี lineId แล้ว ให้รี-เรนเดอร์รายการด้วยภาษาใหม่ (เรียก API ใหม่เพื่อความง่าย)
+      if (lineId) {
+        loadPrintHistory(lineId);
+      }
     }
 
+    // ===== EVENTS =====
     document.getElementById('lang-toggle').addEventListener('click', () => {
       isThai = !isThai;
       updateLanguage(isThai ? 'th' : 'en');
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const lineId = getLineIdFromURL();
+    document.addEventListener('DOMContentLoaded', async () => {
+      // ตั้งค่าภาษาเริ่มต้น
       updateLanguage(isThai ? 'th' : 'en');
+
+      // อ่าน userId จาก LIFF
+      lineId = await getLineUserIdViaLIFF();
+
       if (lineId) {
-        document.getElementById('back-link').href = `index.html?uid=${lineId}`;
+        // back-link กลับหน้าแรก (ไม่พ่วง uid)
+        document.getElementById('back-link').href = `index.html`;
+        // โหลดประวัติ
         loadPrintHistory(lineId);
       } else {
         document.getElementById('history-list').innerHTML =
-          `<p class='text-red-600 text-center text-sm'>UID not found</p>`;
+          `<p class='text-red-600 text-center text-sm'>❌ ไม่สามารถอ่าน LINE UID ได้ โปรดเปิดหน้านี้จากในแอป LINE และตรวจสอบ LIFF ID</p>`;
         document.getElementById('back-link').href = 'index.html';
       }
     });

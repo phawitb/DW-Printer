@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>DeepPrinter</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -62,11 +63,11 @@
           <label for="printer-select-display" id="printer-label" class="block text-lg font-semibold text-gray-700">เลือกเครื่องพิมพ์:</label>
           <span id="geo-hint" class="text-xs text-gray-500"></span>
         </div>
-        <div id="printer-select-display" class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer" onclick="window.location.href='map.html?uid=' + encodeURIComponent(lineId)" style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
+        <!-- เปลี่ยน onclick: ไม่ส่ง uid ใน URL -->
+        <div id="printer-select-display" class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer" onclick="window.location.href='map.html'" style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
           <span id="printer-display-text" class="text-gray-500">-- กรุณาเลือกเครื่องพิมพ์ --</span>
           <input type="hidden" id="selected-printer-id" value="">
-      </div>
-
+        </div>
       </div>
 
       <div id="pdf-list" class="mt-8 space-y-6">⏳ กำลังโหลด...</div>
@@ -95,7 +96,20 @@
   </div>
 
   <script>
-    const API_BASE = "https://dw-printer-lts.onrender.com";
+    // ===== CONFIG =====
+    let API_BASE = "";
+    let LIFF_ID  = "";
+
+    async function loadConfig() {
+      const res = await fetch("/static/config.json", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching /static/config.json`);
+      const cfg = await res.json();
+      API_BASE = cfg.API_BASE;
+      LIFF_ID  = cfg.LIFF_ID;
+      console.log("✅ config loaded:", cfg);
+    }
+
+    // ===== GLOBAL STATE =====
     let printerMap = {};
     let currentRefId = null;   // ใช้ ref_id แทน payment_id
     let paymentCheckInterval = null;
@@ -108,7 +122,9 @@
     let isPaymentSuccessView = false;
     let userCoords = null;
     let selectedPrinterId = null;
+    let lineId = null; // สำคัญ: ประกาศให้ชัดเจน
 
+    // ===== I18N =====
     const translations = {
       th: {
         title: "DeepPrinter",
@@ -140,7 +156,7 @@
         noFileSelected: "กรุณาเลือกไฟล์ก่อนส่งคำสั่งพิมพ์",
         invalidPageInput: "เลขหน้าที่กำหนดเองของไฟล์ {filename} ไม่ถูกต้อง",
         qrFailed: "สร้าง QR Code ล้มเหลว:",
-        invalidUrl: "กรุณาใส่ URL แบบ ?uid=LINE_ID",
+        invalidUrl: "โปรดเปิดหน้านี้จากแอป LINE (LIFF) หรือเช็ค LIFF ID",
         currency: "บาท",
         usingLocation: "",
         noLocation: "",
@@ -183,7 +199,7 @@
         noFileSelected: "Please select a file before submitting the print job.",
         invalidPageInput: "The custom page number for file {filename} is incorrect.",
         qrFailed: "Failed to generate QR Code:",
-        invalidUrl: "Please use a URL with ?uid=LINE_ID",
+        invalidUrl: "Please open this page from the LINE app (LIFF) or check your LIFF ID",
         currency: "Baht",
         usingLocation: "",
         noLocation: "",
@@ -198,6 +214,7 @@
       }
     };
 
+    // ===== UI HELPERS =====
     function checkPrinterSelection() {
       const printerId = document.getElementById("selected-printer-id").value;
       const printerLabel = document.getElementById("printer-label");
@@ -262,6 +279,23 @@
       });
     }
 
+    // ===== LIFF / LINE ID =====
+    async function getLineUserIdViaLIFF() {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login(); // จะ redirect ไป login แล้วกลับมาหน้าเดิม
+          return null;
+        }
+        const profile = await liff.getProfile();
+        return profile.userId; // <-- ใช้ค่านี้แทน uid
+      } catch (err) {
+        console.error("LIFF init/profile error:", err);
+        return null;
+      }
+    }
+
+    // ===== PRINTERS =====
     async function loadPrinters() {
       const printerDisplay = document.getElementById("printer-select-display");
       const printerDisplayText = document.getElementById("printer-display-text");
@@ -306,11 +340,7 @@
       }
     }
 
-    function getLineIdFromURL() {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("uid");
-    }
-
+    // ===== PDFs =====
     function countPages(pages, totalPagesFromAPI) {
       if (pages === "all") return totalPagesFromAPI || 1;
       const pageSet = new Set();
@@ -343,8 +373,8 @@
       return valid;
     }
 
-    async function loadPDFs(lineId) {
-      const listUrl = `${API_BASE}/list-pdfs/${lineId}`;
+    async function loadPDFs(lineIdParam) {
+      const listUrl = `${API_BASE}/list-pdfs/${lineIdParam}`;
       const langData = translations[isThai ? 'th' : 'en'];
       try {
         const res = await fetch(listUrl);
@@ -467,6 +497,7 @@
       });
     }
 
+    // ===== PAYMENT / QR =====
     function startCountdown(durationInSeconds) {
       let timer = durationInSeconds;
       const countdownDisplay = document.getElementById('countdown-display');
@@ -589,8 +620,10 @@
       currentTotalPages = totalPages;
       currentPrinterLocation = printer.location_name;
 
-      configView.classList.add("hidden");
-      paymentView.classList.remove("hidden");
+      const configViewEl = document.getElementById("config-view");
+      const paymentViewEl = document.getElementById("payment-view");
+      configViewEl.classList.add("hidden");
+      paymentViewEl.classList.remove("hidden");
       
       const paymentStatusCard = document.getElementById("payment-status-card");
       paymentStatusCard.innerHTML = `
@@ -669,10 +702,10 @@
             isPaymentSuccessView = true;
           }
 
-          // ย้ายปุ่มไป footer
+          // ย้ายปุ่มไป footer → กลับหน้าแรก โดยไม่พ่วง uid
           const footer = document.querySelector(".fixed-footer .max-w-xl");
           footer.innerHTML = `
-            <button id="back-to-home-btn" onclick="window.location.href='index.html?uid=' + encodeURIComponent(lineId)" class="py-3 text-lg primary-btn w-full">
+            <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
               ${langData.backToHome}
             </button>
           `;
@@ -697,7 +730,7 @@
         // อัปเดต footer เป็นปุ่มกลับบ้าน
         const footer = document.querySelector(".fixed-footer .max-w-xl");
         footer.innerHTML = `
-          <button id="back-to-home-btn" onclick="window.location.href='index.html?uid=' + encodeURIComponent(lineId)" class="py-3 text-lg primary-btn w-full">
+          <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
             ${langData.backToHome}
           </button>
         `;
@@ -753,22 +786,35 @@
       }
     });
 
-    // ===== Init =====
-    const lineId = getLineIdFromURL();
-    if (lineId) {
-      loadPrinters();
-      loadPDFs(lineId);
-      document.getElementById('history-link').href = `historys.html?uid=${lineId}`;
-    } else {
-      document.getElementById("pdf-list").innerHTML = `<p class='text-red-600 text-center'>${translations.th.invalidUrl}</p>`;
-      loadPrinters();
-    }
-    updateLanguage(isThai ? 'th' : 'en');
-    window.addEventListener('load', checkPrinterSelection);
+    // ===== ENTRY POINT =====
+    document.addEventListener('DOMContentLoaded', async () => {
+      updateLanguage(isThai ? 'th' : 'en');
+
+      try {
+        await loadConfig();
+        // 1) อ่าน LINE UID ผ่าน LIFF
+        lineId = await getLineUserIdViaLIFF();
+
+        // 2) โหลดรายการเครื่องพิมพ์ (ไม่ต้องรอ lineId)
+        await loadPrinters();
+
+        // 3) ถ้าอ่าน lineId ได้ → โหลดรายการไฟล์ และตั้งลิงก์ประวัติ (ไม่พ่วง uid)
+        if (lineId) {
+          await loadPDFs(lineId);
+          const historyLink = document.getElementById('history-link');
+          if (historyLink) historyLink.href = 'historys.html';
+        } else {
+          document.getElementById('pdf-list').innerHTML =
+            `<p class='text-red-600 text-center'>${translations.th.invalidUrl}</p>`;
+        }
+      } catch (e) {
+        console.error(e);
+        document.getElementById('pdf-list').innerHTML =
+          `<p class='text-red-600 text-center'>เกิดข้อผิดพลาดในการอ่าน LINE UID</p>`;
+      }
+
+      window.addEventListener('load', checkPrinterSelection);
+    });
   </script>
 </body>
 </html>
-
-
-
-

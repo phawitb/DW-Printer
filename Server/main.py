@@ -6,46 +6,40 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, FileMessage
 from pymongo import MongoClient
 from bson import ObjectId
-
 import base64, os, requests, math, re
 from io import BytesIO
-from datetime import datetime
 from typing import Optional
-
 from pdf2image import convert_from_path
 from PyPDF2 import PdfReader
-from promptpay import qrcode
-
 import folium
 import requests
 import json
-import io
-
 from pytz import timezone
-from dateutil import parser, tz
+from pathlib import Path
+from datetime import datetime, timedelta
 
-# import json
-# === CONFIG ===
-FIXED_PROMPTPAY_NUMBER = "0805471749"
-LINE_CHANNEL_SECRET = "e48db91970c8ff61adee8f9360abeae1"
-LINE_CHANNEL_ACCESS_TOKEN = "JEPIUJhhospgCynVPo8Rx7iwrbyvF81Ux29xLQ/mZadS3NiHX07HBYgBz1/eHdiXwbQ6hmxCg0M1A50mR7BCWUMzfWIo3JlUtpQDVj+WE1iVP4BN4RWIrV8Q77PiB14r/HlD4eY+wAkPVDxmUHqNnAdB04t89/1O/w1cDnyilFU="
-FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "https://dw-printer-lts.onrender.com")
+def load_config():
+    path = Path(__file__).resolve().parent / "static" / "config.json"
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+    
+cfg = load_config()
 
-MONGO_URL = "mongodb+srv://phawitboo:JO3hoCXWCSXECrGB@cluster0.fvc5db5.mongodb.net"
+LINE_CHANNEL_SECRET = cfg["API_BASE"]
+LINE_CHANNEL_ACCESS_TOKEN = cfg["API_BASE"]
+FRONTEND_BASE_URL = cfg["API_BASE"]
+MONGO_URL = cfg["MONGO_URL"]
 DB_NAME = "dimonwall"
 
 client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
 collection_printer = db["printers"]
 collection_payment = db["payment_historys"]
-# collection_users = db["users"]
 
 PDF_DIR = "pdfs"
-MAX_DISK_USAGE_MB = 500
+MAX_DISK_USAGE_MB = cfg["MAX_DISK_USAGE_MB"]
 
 app = FastAPI()
-
-# === Enable CORS ===
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,12 +47,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# === Static (images) ===
 app.mount("/images", StaticFiles(directory="images"), name="images")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
+
+def convert_data_timezone(data, offset_hours=7):
+    """
+    แปลงฟิลด์วันที่ทั้งหมดใน list[dict] ให้เป็น timezone +7
+    ครอบคลุม: created_at, completed_at, upload_failed_at
+    """
+    def convert(dt_str_or_obj):
+        if isinstance(dt_str_or_obj, str):
+            dt = datetime.fromisoformat(dt_str_or_obj)
+        elif isinstance(dt_str_or_obj, datetime):
+            dt = dt_str_or_obj
+        else:
+            return dt_str_or_obj
+        return (dt + timedelta(hours=offset_hours)).isoformat()
+    
+    for d in data:
+        for key in ["created_at", "completed_at", "upload_failed_at"]:
+            if key in d:
+                d[key] = convert(d[key])
+    return data
 
 def generate_folium_map(user_lat=None, user_lon=None):
     """
@@ -68,7 +81,7 @@ def generate_folium_map(user_lat=None, user_lon=None):
     :return: A string containing the HTML of the generated map.
     """
     
-    API_BASE = "https://dw-printer-lts.onrender.com"
+    API_BASE = "https://3f4f50da0de2.ngrok-free.app"
     url = f"{API_BASE}/get_all_printer"
     
     if user_lat and user_lon:
@@ -137,7 +150,6 @@ def generate_folium_map(user_lat=None, user_lon=None):
     map_html = m.get_root().render()
     return map_html
 
-
 # === Utilities ===
 def cleanup_pdfs():
     """Auto-clean PDFs when total size > MAX_DISK_USAGE_MB"""
@@ -165,13 +177,11 @@ def cleanup_pdfs():
             except:
                 pass
 
-
 def get_latest_url(printer_id: str):
     doc = collection_printer.find_one({"printer_id": printer_id}, {"_id": 0})
     if doc:
         return doc.get("url"), doc.get("timestamp")
     return None, None
-
 
 def send_to_printer(PDF_FILE: str, UID: str, printer_id: str):
     printer_url, ts = get_latest_url(printer_id)
@@ -187,7 +197,6 @@ def send_to_printer(PDF_FILE: str, UID: str, printer_id: str):
         return r.status_code == 200, r.text
     except Exception as e:
         return False, str(e)
-
 
 # --- Distance helpers for get_all_printer sorting ---
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -223,7 +232,6 @@ def serve_map():
 @app.get("/historys.html")
 def historys():
     return FileResponse(os.path.join(os.path.dirname(__file__), "historys.html"))
-
 
 # === QR Payment ===
 @app.get("/generate_qr")
@@ -268,7 +276,6 @@ def generate_qr(
         print(f"Error in generate_qr: {e}")
         return {"error": str(e)}
 
-
 @app.get("/check_payment/{ref_id}")
 def check_payment(ref_id: str):
     doc = collection_payment.find_one({"ref_id": ref_id})
@@ -280,7 +287,6 @@ def check_payment(ref_id: str):
     print(f"  - current status: {status}")
 
     return {"ref_id": ref_id, "status": status}
-
 
 
 # === New API for Payment Gateway Webhook ===
@@ -340,77 +346,28 @@ async def pay_completed(request: Request):
         print(f"Error in pay_completed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
-# @app.post("/pay_completed")
-# async def pay_completed(request: Request):
-#     """
-#     Simulates a webhook from a payment gateway.
-#     It receives a ref_id and updates the payment status in MongoDB.
-#     """
-#     try:
-#         data = await request.json()
-#         ref_id = data.get("ref_id")
-        
-#         if not ref_id:
-#             raise HTTPException(status_code=400, detail="Missing ref_id")
-
-#         print(f"Received webhook for ref_id: {ref_id}. Updating status to 'paid'.")
-        
-#         doc = collection_payment.find_one({"ref_id": ref_id})
-#         if not doc:
-#             raise HTTPException(status_code=404, detail="Payment document with this ref_id not found")
-
-#         # Check if the payment has already been completed to prevent duplicates
-#         if doc.get("status") == "paid":
-#             return {"status": "ok", "message": "Payment already completed. No action taken."}
-
-#         # Update the status
-#         update_result = collection_payment.update_one(
-#             {"ref_id": ref_id},
-#             {"$set": {"status": "paid", "completed_at": datetime.utcnow()}},
-#         )
-
-#         if update_result.matched_count == 0:
-#             raise HTTPException(status_code=404, detail="Payment document with this ref_id not found")
-
-#         # --- THIS IS THE CRUCIAL CHANGE ---
-#         # Save history and send print jobs ONLY when the status is updated to completed.
-#         history_doc = doc.copy()
-#         history_doc['status'] = 'paid'
-#         history_doc['completed_at'] = datetime.utcnow()
-#         history_doc.pop('_id')
-#         collection_users.insert_one(history_doc)
-
-#         # Send PDFs to printer
-#         pdf_dir = os.path.join(PDF_DIR, doc["line_id"])
-#         for job in doc["jobs"]:
-#             pdf_file = os.path.join(pdf_dir, job["filename"])
-#             ok, msg = send_to_printer(pdf_file, doc["line_id"], doc["printer_id"])
-#             print("Send to printer:", pdf_file, ok, msg)
-        
-#         return {"status": "ok", "message": "Payment status updated and print job submitted."}
-
-#     except Exception as e:
-#         print(f"Error in pay_completed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
 # === Other existing endpoints (no changes) ===
-@app.post("/cancel_payment/{payment_id}")
-def cancel_payment(payment_id: str):
-    result = collection_payment.update_one(
-        {"_id": ObjectId(payment_id)},
-        {"$set": {"status": "cancelled", "cancelled_at": datetime.utcnow()}},
-    )
-    if result.matched_count == 0:
+@app.post("/cancel_payment/{ref_id}")
+def cancel_payment(ref_id: str):
+    print(f"Cancelling payment for ref_id: {ref_id}")
+    
+    doc = collection_payment.find_one({"ref_id": ref_id})
+    if not doc:
         return JSONResponse(status_code=404, content={"error": "Payment not found"})
-    return {"status": "cancelled"}
 
-collection_config = db["config"]
+    if doc.get("status") not in ["waiting", "cancelled"]:
+        return {"status": "ok", "message": f"Payment already {doc['status']}"}
+
+    collection_payment.update_one(
+        {"ref_id": ref_id},
+        {"$set": {"status": "cancelled"}}
+    )
+
+    return {"status": "ok", "message": "Payment cancelled"}
 
 def get_show_offline_setting() -> bool:
     """อ่าน config จาก MongoDB ว่าจะโชว์ offline printer หรือไม่"""
+    collection_config = db["config"]
     doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")})
     if not doc:
         return True  # ถ้าไม่เจอ config ให้ default = True
@@ -420,10 +377,7 @@ def get_show_offline_setting() -> bool:
 
 
 @app.get("/get_all_printer")
-def get_all_printer(
-    user_lat: Optional[float] = Query(None),
-    user_lon: Optional[float] = Query(None),
-):
+def get_all_printer( user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
     printers = list(collection_printer.find({}, {"_id": 0}))
 
     # ✅ check config
@@ -451,32 +405,6 @@ def get_all_printer(
 
     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
     return {"printers": ordered, "sorted_by": "location_name"}
-
-
-# @app.get("/get_all_printer")
-# def get_all_printer(
-#     user_lat: Optional[float] = Query(None),
-#     user_lon: Optional[float] = Query(None),
-# ):
-#     printers = list(collection_printer.find({}, {"_id": 0}))
-#     if user_lat is not None and user_lon is not None:
-#         for p in printers:
-#             try:
-#                 lat, lon = float(p.get("lat")), float(p.get("lon"))
-#                 p["distance_km"] = round(haversine_km(user_lat, user_lon, lat, lon), 3)
-#             except Exception:
-#                 p["distance_km"] = None
-#         nearest = sorted(
-#             [p for p in printers if p["distance_km"] is not None],
-#             key=lambda x: x["distance_km"],
-#         )
-#         top3 = nearest[:3]
-#         remaining = [p for p in printers if p not in top3]
-#         remaining_sorted = sorted(remaining, key=_printer_id_number)
-#         ordered = top3 + remaining_sorted
-#         return {"printers": ordered, "sorted_by": "nearest_then_id"}
-#     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
-#     return {"printers": ordered, "sorted_by": "location_name"}
 
 @app.get("/list-pdfs/{line_id}")
 def list_pdfs(line_id: str):
@@ -572,8 +500,8 @@ def handle_file_message(event):
         f.write(file_content)
     cleanup_pdfs()
     reply_text = (
-        f"📄 บันทึกไฟล์ `{file_name}` เรียบร้อยแล้ว\n"
-        f"🔗 {FRONTEND_BASE_URL}/index.html?uid={user_id}"
+        f"บันทึกไฟล์ {file_name} เรียบร้อยแล้ว!\n"
+        f"{FRONTEND_BASE_URL}"
     )
     line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
@@ -593,35 +521,6 @@ def serialize_doc(doc):
 def get_payment_history(line_id: str):
     docs = list(collection_payment.find({"line_id": line_id}))
     serialized_docs = [serialize_doc(doc) for doc in docs]
+    serialized_docs = convert_data_timezone(serialized_docs)
+
     return {"history": serialized_docs}
-
-# @app.get("/get_print_history/{line_id}")
-# def get_print_history(
-#     line_id: str,
-#     user_timezone: Optional[str] = Query("UTC")
-# ):
-#     try:
-#         user_tz = timezone(user_timezone)
-#     except Exception:
-#         raise HTTPException(status_code=400, detail="Invalid time zone")
-
-#     history = list(collection_users.find({"line_id": line_id}, {"_id": 0}))
-#     all_printers = list(collection_printer.find({}, {"_id": 0}))
-#     printer_map = {p.get("printer_id"): p.get("location_name", "ไม่ระบุ") for p in all_printers}
-#     history.sort(key=lambda x: x.get("completed_at", datetime.min), reverse=True)
-    
-#     processed_history = []
-#     for item in history:
-#         if 'jobs' in item and isinstance(item['jobs'], list):
-#             printer_id = item.get('printer_id')
-#             item['printer_name'] = printer_map.get(printer_id, "ไม่ระบุ")
-
-#             # Convert UTC datetime to user's local timezone
-#             completed_at_utc = item.get('completed_at')
-#             if completed_at_utc:
-#                 completed_at_local = completed_at_utc.replace(tzinfo=tz.UTC).astimezone(user_tz)
-#                 item['completed_at_local'] = completed_at_local.isoformat()
-            
-#             processed_history.append(item)
-    
-#     return {"history": processed_history}

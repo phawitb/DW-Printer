@@ -57,7 +57,7 @@
   </div>
 
   <script>
-    const API_BASE = "https://dw-printer-lts.onrender.com";
+    const API_BASE = "https://acebb428abfb.ngrok-free.app";
     let isThai = true;
     let printerMap = {};
     let userCoords = null;
@@ -73,7 +73,7 @@
       th: {
         title: "เลือกเครื่องพิมพ์", list: "รายการ", map: "แผนที่",
         loadingFailed: "❌ โหลดเครื่องพิมพ์ล้มเหลว", noPrinterFound: "ไม่พบเครื่องพิมพ์", km: "กม.",
-        online: "🟢 ออนไลน์", offline: "🔴 ออฟไลน์",
+        online: "🟢 ออนไลน์", offline: "🔴 ออฟไลน์", outside: "🟡 ออนไลน์ (นอกเวลาทำการ)",
         select: "เลือกเครื่องนี้", nav: "นำทาง",
         color_printer: "เครื่องพิมพ์สี", bw_printer: "เครื่องพิมพ์ขาวดำ",
         color: "สี", bw: "ขาวดำ", baht: "บาท",
@@ -83,7 +83,7 @@
       en: {
         title: "Select a Printer", list: "List", map: "Map",
         loadingFailed: "❌ Failed to load printers", noPrinterFound: "No printers found", km: "km",
-        online: "🟢 Online", offline: "🔴 Offline",
+        online: "🟢 Online", offline: "🔴 Offline", outside: "🟡 Online (Outside Hours)",
         select: "Select printer", nav: "Navigation",
         color_printer: "Color Printer", bw_printer: "Black-and-White Printer",
         color: "Color", bw: "Black-and-White", baht: "Baht",
@@ -154,6 +154,24 @@
       }
     }
 
+    function isPrinterOpen(printer) {
+      if (!printer.open_time || !printer.close_time) return true;
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+      const [openHour, openMin] = printer.open_time.split(':').map(Number);
+      const openMinutes = openHour * 60 + openMin;
+
+      const [closeHour, closeMin] = printer.close_time.split(':').map(Number);
+      const closeMinutes = closeHour * 60 + closeMin;
+
+      if (openMinutes <= closeMinutes) {
+        return currentMinutes >= openMinutes && currentMinutes < closeMinutes;
+      } else {
+        return currentMinutes >= openMinutes || currentMinutes < closeMinutes;
+      }
+    }
+
     function renderListView(printers) {
       const listView = document.getElementById("list-view");
       const lang = isThai ? 'th' : 'en';
@@ -175,7 +193,20 @@
         const card = document.createElement("div");
         card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
         
-        const statusText = printer.status === 'online' ? t.online : t.offline;
+        let statusText, statusClass;
+        if (printer.status === 'online') {
+          if (isPrinterOpen(printer)) {
+            statusText = t.online;
+            statusClass = "text-green-600";
+          } else {
+            statusText = t.outside;
+            statusClass = "text-yellow-600";
+          }
+        } else {
+          statusText = t.offline;
+          statusClass = "text-red-600";
+        }
+
         const distText = (typeof printer.distance_km === "number") ? ` • ${printer.distance_km.toFixed(2)} ${t.km}` : '';
         const operatingHours = printer.open_time && printer.close_time 
             ? `<p class="text-sm text-gray-600 mt-1">🕒 ${t.operating_hours}: ${printer.open_time} - ${printer.close_time}</p>` 
@@ -212,7 +243,7 @@
         card.innerHTML = `
             <div class="flex items-start justify-between">
                 <h4 class="text-lg font-semibold">${printer.location_name}</h4>
-                <span class="text-sm font-medium ${printer.status === 'online' ? 'text-green-600' : 'text-red-600'}">${statusText}</span>
+                <span class="text-sm font-medium ${statusClass}">${statusText}</span>
             </div>
             ${typeAndPriceHtml}
             <div class="flex gap-2 pt-2">
@@ -246,6 +277,17 @@
 
       printers.forEach(printer => {
         if (printer.lat && printer.lon) {
+          let statusText, statusColor;
+          if (printer.status === 'online') {
+            if (isPrinterOpen(printer)) {
+              statusText = `<b style="color:green;">${t.online}</b>`;
+            } else {
+              statusText = `<b style="color:orange;">${t.outside}</b>`;
+            }
+          } else {
+            statusText = `<b style="color:red;">${t.offline}</b>`;
+          }
+
           const typeText = printer.bw_only ? `<span class="font-bold">${t.bw_printer}</span>` : `<span class="rainbow-text font-bold">${t.color_printer}</span>`;
           const priceTextBw = `${t.bw}: ${printer.bw_price} ${t.baht}`;
           const priceTextColor = printer.bw_only ? '' : `<br>${t.color}: ${printer.color_price} ${t.baht}`;
@@ -265,7 +307,7 @@
             popupContent = `
               <b>${printer.location_name}</b><br>
               ${typeText}<br>
-              <b style="color:green;">${t.online}</b><br>
+              ${statusText}<br>
               ${operatingHoursHtml}
               ${priceTextBw}
               ${priceTextColor}<br>
@@ -278,7 +320,7 @@
             popupContent = `
               <b>${printer.location_name}</b><br>
               ${typeText}<br>
-              <b style="color:red;">${t.offline}</b><br>
+              ${statusText}<br>
               ${operatingHoursHtml}
               ${priceTextBw}
               ${priceTextColor}<br>
@@ -305,27 +347,7 @@
       if (printer.open_time && printer.close_time) {
         const lang = isThai ? 'th' : 'en';
         const t = translations[lang];
-        const now = new Date();
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-        const [openHour, openMin] = printer.open_time.split(':').map(Number);
-        const openMinutes = openHour * 60 + openMin;
-
-        const [closeHour, closeMin] = printer.close_time.split(':').map(Number);
-        const closeMinutes = closeHour * 60 + closeMin;
-
-        let isOpen = false;
-        if (openMinutes <= closeMinutes) {
-          if (currentMinutes >= openMinutes && currentMinutes < closeMinutes) {
-            isOpen = true;
-          }
-        } else {
-          if (currentMinutes >= openMinutes || currentMinutes < closeMinutes) {
-            isOpen = true;
-          }
-        }
-
-        if (isOpen) {
+        if (isPrinterOpen(printer)) {
           proceedAction();
         } else {
           let message = t.outside_hours_confirm
