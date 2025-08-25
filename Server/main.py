@@ -545,9 +545,9 @@ def handle_text_message(event):
     text = event.message.text.strip()
     if text.startswith("/print"):
         reply = "🖨 สั่งพิมพ์ (mock)"
-    else:
-        reply = f"คุณพิมพ์ว่า: {text}"
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
+    # else:
+    #     reply = f"คุณพิมพ์ว่า: {text}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply))
 
 @handler.add(MessageEvent, message=FileMessage)
 def handle_file_message(event):
