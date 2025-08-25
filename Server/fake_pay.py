@@ -2,8 +2,8 @@ import requests
 import json
 
 
-api_url = "https://acebb428abfb.ngrok-free.app/pay_completed"
-ref_id_to_update = "Ud4182b71d88670ab7c347c6fcf6752c6_1756032156.058502"
+api_url = "https://e6ae93928e64.ngrok-free.app/pay_completed"
+ref_id_to_update = "Ud4182b71d88670ab7c347c6fcf6752c6_1756113420.19174"
 
 # The data to be sent in the request body
 payload = {

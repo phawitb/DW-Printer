@@ -25,6 +25,7 @@
     .status-uploadfail { background-color: #FEE2E2; color: #991B1B; }/* แดง */
     .status-printingfail { background-color: #FEE2E2; color: #991B1B; }/* แดง */
     .status-finished { background-color: #D1FAE5; color: #065F46; }  /* เขียว */
+    .status-uploaded { background-color: #BFDBFE; color: #1E3A8A; }  /* ฟ้า */
     .label { font-size: 0.85rem; font-weight: 400; color: #374151; }
     .value { font-size: 0.9rem; color: #1f2937; }
     .ref-id { word-break: break-all; font-size: 0.8rem; color: #6b7280; }
@@ -65,9 +66,6 @@
       console.log("✅ config loaded:", cfg);
     }
 
-    // const API_BASE = "https://acebb428abfb.ngrok-free.app"; // เปลี่ยนตามจริงได้
-    // const LIFF_ID  = "2007983323-BlxkXqZ7"; // TODO: ใส่ LIFF ID จริงของโปรเจกต์
-
     // ===== STATE =====
     let isThai = true;
     let lineId = null;
@@ -105,7 +103,8 @@
         cancelled: "ยกเลิก",
         uploadfail: "อัปโหลดล้มเหลว",
         printingfail: "พิมพ์ล้มเหลว",
-        finished: "เสร็จสิ้น"
+        finished: "เสร็จสิ้น",
+        uploaded: "อัปโหลดแล้ว"
       },
       en: {
         title: "Print History",
@@ -138,16 +137,15 @@
         cancelled: "Cancelled",
         uploadfail: "Upload Failed",
         printingfail: "Printing Failed",
-        finished: "Finished"
+        finished: "Finished",
+        uploaded: "Uploaded"
       }
     };
 
     // ===== LIFF =====
     async function getLineUserIdViaLIFF() {
       try {
-
         await loadConfig();
-
         await liff.init({ liffId: LIFF_ID });
         if (!liff.isLoggedIn()) {
           liff.login();
@@ -164,7 +162,6 @@
     // ===== UTIL =====
     function formatDate(isoString) {
       if (!isoString) return "-";
-      // แปลงเวลาเป็นโซนเอเชีย/กรุงเทพฯ โดยไม่บวกมือ
       try {
         return new Date(isoString).toLocaleString(isThai ? 'th-TH' : 'en-US', {
           year: 'numeric',
@@ -194,6 +191,7 @@
         case 'uploadfail': return langData.uploadfail;
         case 'printingfail': return langData.printingfail;
         case 'finished': return langData.finished;
+        case 'uploaded': return langData.uploaded;
         default: return status;
       }
     }
@@ -211,7 +209,6 @@
 
         listDiv.innerHTML = "";
         if (data.history && data.history.length > 0) {
-          // เรียงตาม created_at จากล่าสุด → เก่าสุด
           data.history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
           data.history.forEach(item => {
@@ -275,7 +272,6 @@
       document.querySelector('#lang-text').textContent = lang.toUpperCase();
       document.getElementById('back-link').textContent = langData.back;
 
-      // ถ้ามี lineId แล้ว ให้รี-เรนเดอร์รายการด้วยภาษาใหม่ (เรียก API ใหม่เพื่อความง่าย)
       if (lineId) {
         loadPrintHistory(lineId);
       }
@@ -288,16 +284,11 @@
     });
 
     document.addEventListener('DOMContentLoaded', async () => {
-      // ตั้งค่าภาษาเริ่มต้น
       updateLanguage(isThai ? 'th' : 'en');
-
-      // อ่าน userId จาก LIFF
       lineId = await getLineUserIdViaLIFF();
 
       if (lineId) {
-        // back-link กลับหน้าแรก (ไม่พ่วง uid)
         document.getElementById('back-link').href = `index.html`;
-        // โหลดประวัติ
         loadPrintHistory(lineId);
       } else {
         document.getElementById('history-list').innerHTML =

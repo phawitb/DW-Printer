@@ -332,8 +332,7 @@ async def pay_completed(request: Request):
                     {"ref_id": ref_id},
                     {"$set": {
                         "status": "uploadfail",
-                        "upload_error": msg,
-                        "upload_failed_at": datetime.utcnow()
+                        "completed_at": datetime.utcnow()
                     }}
                 )
                 break  # ไม่ต้องส่งไฟล์ที่เหลือแล้ว
@@ -341,6 +340,13 @@ async def pay_completed(request: Request):
         if upload_failed:
             return {"status": "error", "message": "Payment updated but upload to printer failed."}
         else:
+            collection_payment.update_one(
+                    {"ref_id": ref_id},
+                    {"$set": {
+                        "status": "uploaded",
+                        "completed_at": datetime.utcnow()
+                    }}
+                )
             return {"status": "ok", "message": "Payment updated and print job submitted."}
 
     except Exception as e:
@@ -378,10 +384,35 @@ def get_show_offline_setting() -> bool:
 
 
 @app.get("/get_all_printer")
-def get_all_printer( user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
+def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
     printers = list(collection_printer.find({}, {"_id": 0}))
 
-    # ✅ check config
+    # === ตรวจสอบ last_seen ===
+    tz = timezone("Asia/Bangkok")
+    now = datetime.now(tz)
+    for p in printers:
+        last_seen = p.get("last_seen")
+        status = "offline"
+        try:
+            if last_seen:
+                # last_seen อาจจะเป็น str หรือ datetime
+                if isinstance(last_seen, str):
+                    last_seen = datetime.fromisoformat(last_seen)
+                elif isinstance(last_seen, datetime):
+                    pass
+                else:
+                    last_seen = None
+
+                if last_seen:
+                    last_seen = last_seen.astimezone(tz)
+                    if now - last_seen <= timedelta(minutes=2):
+                        status = "online"
+        except Exception:
+            status = "offline"
+
+        p["status"] = status
+
+    # ✅ check config ว่าจะแสดง offline ไหม
     if not get_show_offline_setting():
         printers = [p for p in printers if p.get("status") == "online"]
 
@@ -406,6 +437,36 @@ def get_all_printer( user_lat: Optional[float] = Query(None), user_lon: Optional
 
     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
     return {"printers": ordered, "sorted_by": "location_name"}
+
+# @app.get("/get_all_printer")
+# def get_all_printer( user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
+#     printers = list(collection_printer.find({}, {"_id": 0}))
+
+#     # ✅ check config
+#     if not get_show_offline_setting():
+#         printers = [p for p in printers if p.get("status") == "online"]
+
+#     # --- คำนวณระยะทาง ---
+#     if user_lat is not None and user_lon is not None:
+#         for p in printers:
+#             try:
+#                 lat, lon = float(p.get("lat")), float(p.get("lon"))
+#                 p["distance_km"] = round(haversine_km(user_lat, user_lon, lat, lon), 3)
+#             except Exception:
+#                 p["distance_km"] = None
+
+#         nearest = sorted(
+#             [p for p in printers if p["distance_km"] is not None],
+#             key=lambda x: x["distance_km"],
+#         )
+#         top3 = nearest[:3]
+#         remaining = [p for p in printers if p not in top3]
+#         remaining_sorted = sorted(remaining, key=_printer_id_number)
+#         ordered = top3 + remaining_sorted
+#         return {"printers": ordered, "sorted_by": "nearest_then_id"}
+
+#     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
+#     return {"printers": ordered, "sorted_by": "location_name"}
 
 @app.get("/list-pdfs/{line_id}")
 def list_pdfs(line_id: str):
@@ -525,3 +586,38 @@ def get_payment_history(line_id: str):
     serialized_docs = convert_data_timezone(serialized_docs)
 
     return {"history": serialized_docs}
+
+
+# === Serve feedback.html ===
+@app.get("/feedback.html")
+def serve_feedback():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "feedback.html"))
+
+
+# === API: Sent Feedback ===
+@app.post("/sent_feedback")
+async def sent_feedback(request: Request):
+    try:
+        data = await request.json()
+        uid = data.get("uid")
+        topic = data.get("topic")
+        message = data.get("message")
+        # timestamp = data.get("timestamp")
+
+        if not uid or not topic or not message:
+            raise HTTPException(status_code=400, detail="Missing required fields")
+
+        feedback_doc = {
+            "uid": uid,
+            "topic": topic,
+            "message": message,
+            # "timestamp": datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else timestamp,
+            "created_at": datetime.utcnow()
+        }
+
+        result = db["feedbacks"].insert_one(feedback_doc)
+        return {"status": "ok", "feedback_id": str(result.inserted_id)}
+
+    except Exception as e:
+        print(f"Error in sent_feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
