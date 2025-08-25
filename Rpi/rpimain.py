@@ -30,16 +30,23 @@ async def upload_pdf(uid: str = Form(...), file: UploadFile = File(...)):
 
     with open(save_path, "wb") as f:
         f.write(await file.read())
-
-    try:
-        # Print using lp command
-        subprocess.run(["lp", "-d", PRINTER_NAME, save_path], check=True)
-
-        return {
-            "status": "success",
+        
+    return {
+            "status": "uploaded",
             "uid": uid,
             "filename": save_name,
             "message": f"Printed {save_name} for user {uid}"
         }
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+
+#    try:
+#        # Print using lp command
+#        subprocess.run(["lp", "-d", PRINTER_NAME, save_path], check=True)
+#
+#        return {
+#            "status": "success",
+#            "uid": uid,
+#            "filename": save_name,
+#            "message": f"Printed {save_name} for user {uid}"
+#        }
+#    except Exception as e:
+#        return {"status": "uploadfail"}
