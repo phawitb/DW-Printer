@@ -306,6 +306,12 @@ async def pay_completed(request: Request):
         doc = collection_payment.find_one({"ref_id": ref_id})
         if not doc:
             raise HTTPException(status_code=404, detail="Payment document with this ref_id not found")
+        
+        # sent line chat
+        line_bot_api.push_message(
+            doc["line_id"],
+            TextSendMessage(text="✅ ชำระเงินเรียบร้อยแล้ว กำลังพิมพ์...\nตรวจสอบสถานะได้ที่: {}/historys.html".format(FRONTEND_BASE_URL))
+        )
 
         # ถ้าจ่ายแล้ว → ข้าม
         if doc.get("status") == "paid":
