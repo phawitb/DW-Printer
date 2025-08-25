@@ -388,7 +388,6 @@ def get_show_offline_setting() -> bool:
     val = frontend_cfg.get("show_offline_printer", "True")
     return str(val).lower() == "true"
 
-
 @app.get("/get_all_printer")
 def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
     printers = list(collection_printer.find({}, {"_id": 0}))
@@ -404,18 +403,23 @@ def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[
                 # last_seen อาจจะเป็น str หรือ datetime
                 if isinstance(last_seen, str):
                     last_seen = datetime.fromisoformat(last_seen)
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=tz)
                 elif isinstance(last_seen, datetime):
-                    pass
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=tz)
                 else:
                     last_seen = None
 
                 if last_seen:
-                    print("last_seen (original):", last_seen, type(last_seen))
-                    print("now:", now, type(now))
                     last_seen = last_seen.astimezone(tz)
-                    if now - last_seen <= timedelta(minutes=2):
+                    delta = now - last_seen
+                    print(f"🕒 now: {now} | last_seen: {last_seen} | delta: {delta}")
+
+                    if delta <= timedelta(minutes=2):
                         status = "online"
-        except Exception:
+        except Exception as e:
+            print("❌ Error parsing last_seen:", e)
             status = "offline"
 
         p["status"] = status
@@ -445,6 +449,63 @@ def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[
 
     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
     return {"printers": ordered, "sorted_by": "location_name"}
+
+# @app.get("/get_all_printer")
+# def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
+#     printers = list(collection_printer.find({}, {"_id": 0}))
+
+#     # === ตรวจสอบ last_seen ===
+#     tz = timezone("Asia/Bangkok")
+#     now = datetime.now(tz)
+#     for p in printers:
+#         last_seen = p.get("last_seen")
+#         status = "offline"
+#         try:
+#             if last_seen:
+#                 # last_seen อาจจะเป็น str หรือ datetime
+#                 if isinstance(last_seen, str):
+#                     last_seen = datetime.fromisoformat(last_seen)
+#                 elif isinstance(last_seen, datetime):
+#                     pass
+#                 else:
+#                     last_seen = None
+
+#                 if last_seen:
+#                     print("last_seen (original):", last_seen, type(last_seen))
+#                     print("now:", now, type(now))
+#                     last_seen = last_seen.astimezone(tz)
+#                     if now - last_seen <= timedelta(minutes=2):
+#                         status = "online"
+#         except Exception:
+#             status = "offline"
+
+#         p["status"] = status
+
+#     # ✅ check config ว่าจะแสดง offline ไหม
+#     if not get_show_offline_setting():
+#         printers = [p for p in printers if p.get("status") == "online"]
+
+#     # --- คำนวณระยะทาง ---
+#     if user_lat is not None and user_lon is not None:
+#         for p in printers:
+#             try:
+#                 lat, lon = float(p.get("lat")), float(p.get("lon"))
+#                 p["distance_km"] = round(haversine_km(user_lat, user_lon, lat, lon), 3)
+#             except Exception:
+#                 p["distance_km"] = None
+
+#         nearest = sorted(
+#             [p for p in printers if p["distance_km"] is not None],
+#             key=lambda x: x["distance_km"],
+#         )
+#         top3 = nearest[:3]
+#         remaining = [p for p in printers if p not in top3]
+#         remaining_sorted = sorted(remaining, key=_printer_id_number)
+#         ordered = top3 + remaining_sorted
+#         return {"printers": ordered, "sorted_by": "nearest_then_id"}
+
+#     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
+#     return {"printers": ordered, "sorted_by": "location_name"}
 
 # @app.get("/get_all_printer")
 # def get_all_printer( user_lat: Optional[float] = Query(None), user_lon: Optional[float] = Query(None)):
