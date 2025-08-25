@@ -410,6 +410,8 @@ def get_all_printer(user_lat: Optional[float] = Query(None), user_lon: Optional[
                     last_seen = None
 
                 if last_seen:
+                    print("last_seen (original):", last_seen, type(last_seen))
+                    print("now:", now, type(now))
                     last_seen = last_seen.astimezone(tz)
                     if now - last_seen <= timedelta(minutes=2):
                         status = "online"
