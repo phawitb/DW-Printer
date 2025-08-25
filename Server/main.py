@@ -81,7 +81,8 @@ def generate_folium_map(user_lat=None, user_lon=None):
     :return: A string containing the HTML of the generated map.
     """
     
-    API_BASE = "https://3f4f50da0de2.ngrok-free.app"
+    # API_BASE = "https://3f4f50da0de2.ngrok-free.app"
+    API_BASE = cfg["API_BASE"]
     url = f"{API_BASE}/get_all_printer"
     
     if user_lat and user_lon:

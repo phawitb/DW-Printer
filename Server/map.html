@@ -57,7 +57,17 @@
   </div>
 
   <script>
-    const API_BASE = "https://acebb428abfb.ngrok-free.app";
+    let API_BASE = "";
+
+    async function loadConfig() {
+      const res = await fetch("/static/config.json", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching /static/config.json`);
+      const cfg = await res.json();
+      API_BASE = cfg.API_BASE;
+      console.log("✅ config loaded:", cfg);
+    }
+    // const API_BASE = "https://acebb428abfb.ngrok-free.app";
+
     let isThai = true;
     let printerMap = {};
     let userCoords = null;
