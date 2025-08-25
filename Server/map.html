@@ -66,7 +66,6 @@
       API_BASE = cfg.API_BASE;
       console.log("✅ config loaded:", cfg);
     }
-    // const API_BASE = "https://acebb428abfb.ngrok-free.app";
 
     let isThai = true;
     let printerMap = {};
@@ -401,6 +400,14 @@
     // --- Initial Load ---
     loadPrinters();
     updateLanguage('th');
+
+    // ✅ Default tab check from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("default") === "map") {
+      document.getElementById("map-tab").click();
+    } else {
+      document.getElementById("list-tab").click();
+    }
   </script>
 </body>
 </html>
