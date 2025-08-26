@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepPrinter</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary-color: #2563EB;
+      --secondary-color: #60A5FA;
+      --accent-color: #fca5a5;
+      --background-light: #f9fafb;
+      --text-main: #1f2937;
+      --text-light: #6b7280;
+      --border-color: #e5e7eb;
+    }
+    body { font-family: 'Kanit', sans-serif !important; background-color: var(--background-light); color: var(--text-main); padding-bottom: 0px; }
+    .card { background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+    .primary-btn { background-color: var(--primary-color); color: white; font-weight: 600; border-radius: 9999px; transition: background-color 0.2s; width: 100%; }
+    .primary-btn:hover { background-color: var(--secondary-color); }
+    .input-field { border-color: var(--border-color); border-radius: 8px; }
+    .fixed-footer { position: fixed; bottom: 0; left: 0; width: 100%; background-color: white; padding: 0.75rem 1.5rem; box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1), 0 -2px 4px -2px rgb(0 0 0 / 0.1); z-index: 1000; }
+    .modern-select { appearance: none; background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-down"><polyline points="6 9 12 15 18 9"></polyline></svg>'); background-repeat: no-repeat; background-position: right 1rem center; background-size: 1.25rem; cursor: pointer; padding-right: 2.5rem; }
+    .modern-select:disabled { background-color: #f3f4f6; cursor: not-allowed; }
+    .hidden { display: none; }
+    #logo-container { display: flex; align-items: center; }
+    #logo-container img { height: 4em; margin-right: 0.5rem; box-shadow: none; border-radius: 0; vertical-align: middle; }
+
+    .border-red {
+      border: 2px solid #ef4444 !important; /* tailwind red-500 */
+    }
+    .pdf-card label {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;   /* ✅ จำกัดแค่ 2 บรรทัด */
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      word-break: break-word;  /* ✅ กันคำยาวติดกันไม่ตัด */
+    }
+
+
+
+  </style>
+</head>
+<body class="bg-gray-100 p-6 md:p-12">
+
+  <div class="max-w-xl mx-auto space-y-8 pb-40">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center" style="align-items: center;">
+        <div id="logo-container" class="flex items-center">
+          <img src="images/logo.png" alt="Logo" class="h-12">
+        </div>
+        <h2 class="text-3xl font-bold">DeepPrinter</h2>
+      </div>
+      <div class="flex items-center gap-2">
+        <a href="#" id="history-link" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+            <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.438-.695Z" clip-rule="evenodd" />
+          </svg>
+        </a>
+        <button id="lang-toggle" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <div class="flex items-center space-x-1">
+            <span id="lang-text" class="text-sm font-semibold">TH</span>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <div id="config-view">
+      <div class="space-y-2">
+        <div class="flex items-center justify-between">
+          <label for="printer-select-display" id="printer-label" class="block text-lg font-semibold text-gray-700">เลือกเครื่องพิมพ์:</label>
+          <span id="geo-hint" class="text-xs text-gray-500"></span>
+        </div>
+        <!-- เปลี่ยน onclick: ไม่ส่ง uid ใน URL -->
+        <!-- <div id="printer-select-display" class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer" onclick="window.location.href='map.html'" style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
+          <span id="printer-display-text" class="text-gray-500">-- กรุณาเลือกเครื่องพิมพ์ --</span>
+          <input type="hidden" id="selected-printer-id" value="">
+        </div> -->
+        <div id="printer-select-display" 
+            class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer"
+            onclick="window.location.href='map.html'" 
+            style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
+          <span id="printer-display-text" class="text-gray-500">-- กรุณาเลือกเครื่องพิมพ์ --</span>
+          <input type="hidden" id="selected-printer-id" value="">
+        </div>
+
+      </div>
+
+      <!-- <div class="mt-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Upload PDF</label>
+        <input id="file-input" type="file" accept="application/pdf" 
+               class="block w-full text-sm text-gray-700 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+        <button onclick="uploadFile()" 
+                class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          อัปโหลดไฟล์
+        </button>
+      </div> -->
+      <div class="mt-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Upload PDF</label>
+        <input id="file-input" type="file" accept="application/pdf"
+               onchange="uploadFile()" 
+               class="block w-full text-sm text-gray-700 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      
+
+      <div id="pdf-list" class="mt-8 space-y-6">⏳ กำลังโหลด...</div>
+    </div>
+    
+    <div id="payment-view" class="hidden">
+      <div id="payment-status-card" class="card p-8 flex flex-col items-center justify-center text-center"></div>
+      <div class="card p-6 w-full space-y-4 mt-6 mb-2">
+        <h3 id="print-job-summary-heading" class="text-xl font-bold text-gray-800">รายการสั่งพิมพ์</h3>
+        <div class="space-y-2 text-sm">
+          <p><strong id="printer-name-summary">เครื่องพิมพ์:</strong></p>
+          <p><strong id="total-price-summary">ยอดชำระรวม:</strong></p>
+          <p><strong id="total-page-count-summary">จำนวนหน้ารวม:</strong></p>
+        </div>
+        <div id="job-summary-list" class="h-56 overflow-y-auto pr-2 text-sm"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="fixed-footer">
+    <div class="max-w-xl mx-auto">
+      <button id="print-btn" onclick="submitPrint()" class="py-2 text-base primary-btn">
+        ตกลง
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ===== CONFIG =====
+    let API_BASE = "";
+    let LIFF_ID  = "";
+
+    async function loadConfig() {
+      const res = await fetch("/static/config.json", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status} fetching /static/config.json`);
+      const cfg = await res.json();
+      API_BASE = cfg.API_BASE;
+      LIFF_ID  = cfg.LIFF_ID;
+      console.log("✅ config loaded:", cfg);
+    }
+
+    // ===== GLOBAL STATE =====
+    let printerMap = {};
+    let currentRefId = null;   // ใช้ ref_id แทน payment_id
+    let paymentCheckInterval = null;
+    let isThai = true;
+    let currentPrintJobs = [];
+    let currentTotalAmount = 0;
+    let currentTotalPages = 0;
+    let currentPrinterLocation = '';
+    let countdownInterval = null;
+    let isPaymentSuccessView = false;
+    let userCoords = null;
+    let selectedPrinterId = null;
+    let lineId = null; // สำคัญ: ประกาศให้ชัดเจน
+
+    // ===== I18N =====
+    const translations = {
+      th: {
+        title: "DeepPrinter",
+        selectPrinter: "เลือกเครื่องพิมพ์:",
+        selectPlaceholder: "-- กรุณาเลือกเครื่องพิมพ์ --",
+        loading: "⏳ กำลังโหลด...",
+        loadingFailed: "❌ โหลดเครื่องพิมพ์ล้มเหลว",
+        noFiles: "❌ ไม่พบไฟล์ PDF\n(กรุณาอัปโหลดไฟล์ผ่านแชทบอท)",
+        page: "หน้า:",
+        all: "ทั้งหมด",
+        custom: "กำหนดเอง:",
+        color: "สี:",
+        bw: "ขาวดำ",
+        copies: "สำเนา:",
+        printBtn: "ตกลง",
+        editBtn: "ยกเลิก",
+        totalAmount: "ยอดชำระทั้งหมด:",
+        totalPages: "จำนวนหน้าทั้งหมด:",
+        creatingQR: "กำลังสร้าง QR Code...",
+        scanToPay: "สแกนเพื่อชำระเงิน",
+        waitingPayment: "รอการชำระเงิน",
+        printJobSummary: "รายการสั่งพิมพ์",
+        printer: "เครื่องพิมพ์:",
+        totalPrice: "ยอดชำระรวม:",
+        totalPageCount: "จำนวนหน้ารวม:",
+        paymentSuccess: "ชำระเงินสำเร็จ",
+        jobSent: "คำสั่งพิมพ์ถูกส่งไปยังเครื่องเรียบร้อยแล้ว",
+        noPrinterSelected: "กรุณาเลือกเครื่องพิมพ์ก่อน",
+        noFileSelected: "กรุณาเลือกไฟล์ก่อนส่งคำสั่งพิมพ์",
+        invalidPageInput: "เลขหน้าที่กำหนดเองของไฟล์ {filename} ไม่ถูกต้อง",
+        qrFailed: "สร้าง QR Code ล้มเหลว:",
+        invalidUrl: "โปรดเปิดหน้านี้จากแอป LINE (LIFF) หรือเช็ค LIFF ID",
+        currency: "บาท",
+        usingLocation: "",
+        noLocation: "",
+        askingLocation: "กำลังขอสิทธิ์ตำแหน่ง...",
+        locationDenied: "",
+        km: "กม.",
+        printType: "ชนิด:",
+        pricePerPage: "ราคาต่อแผ่น:",
+        printCopies: "สำนวน:",
+        version: "ฉบับ",
+        backToHome: "กลับสู่หน้าหลัก"
+      },
+      en: {
+        title: "DeepPrinter",
+        selectPrinter: "Select Printer:",
+        selectPlaceholder: "-- Please select a printer --",
+        loading: "⏳ Loading...",
+        loadingFailed: "❌ Failed to load printers",
+        noFiles: "❌ No PDF files found",
+        page: "Pages:",
+        all: "All",
+        custom: "Custom:",
+        color: "Color:",
+        bw: "B&W",
+        copies: "Copies:",
+        printBtn: "OK",
+        editBtn: "Cancel",
+        totalAmount: "Total Amount:",
+        totalPages: "Total Pages:",
+        creatingQR: "Generating QR Code...",
+        scanToPay: "Scan to Pay",
+        waitingPayment: "Waiting for payment",
+        printJobSummary: "Print Job Summary",
+        printer: "Printer:",
+        totalPrice: "Total Price:",
+        totalPageCount: "Total Pages:",
+        paymentSuccess: "Payment successful",
+        jobSent: "Print job sent to printer!",
+        noPrinterSelected: "Please select a printer first.",
+        noFileSelected: "Please select a file before submitting the print job.\n(Please upload files via the chatbot)",
+        invalidPageInput: "The custom page number for file {filename} is incorrect.",
+        qrFailed: "Failed to generate QR Code:",
+        invalidUrl: "Please open this page from the LINE app (LIFF) or check your LIFF ID",
+        currency: "Baht",
+        usingLocation: "",
+        noLocation: "",
+        askingLocation: "Requesting location permission...",
+        locationDenied: "",
+        km: "km",
+        printType: "Type:",
+        pricePerPage: "Price per page:",
+        printCopies: "Version:",
+        version: "copy",
+        backToHome: "Back to Home"
+      }
+    };
+
+    // ===== UI HELPERS =====
+    // function checkPrinterSelection() {
+    //   const printerId = document.getElementById("selected-printer-id").value;
+    //   const printerLabel = document.getElementById("printer-label");
+    //   if (!printerId) {
+    //     printerLabel.classList.add("text-red-500");
+    //   } else {
+    //     printerLabel.classList.remove("text-red-500");
+    //   }
+    // }
+    function checkPrinterSelection() {
+      const printerId = document.getElementById("selected-printer-id").value;
+      const printerLabel = document.getElementById("printer-label");
+      const printerBox = document.getElementById("printer-select-display");
+      const printerDisplayText = document.getElementById("printer-display-text");
+
+      if (!printerId) {
+        printerLabel.classList.add("text-red-500");
+        printerBox.classList.add("border-red");
+        printerDisplayText.classList.add("text-red-500");
+        printerDisplayText.classList.remove("text-black");    // ❌ เอาสีดำออก
+        printerDisplayText.classList.add("text-gray-500");    // ✅ placeholder เป็นสีเทา
+      } else {
+        printerLabel.classList.remove("text-red-500");
+        printerBox.classList.remove("border-red");
+        printerDisplayText.classList.remove("text-red-500", "text-gray-500");
+        printerDisplayText.classList.add("text-black");       // ✅ เมื่อเลือกแล้วเป็นสีดำ
+      }
+    }
+
+
+
+
+    function updateLanguage(lang) {
+      const langData = translations[lang];
+      document.querySelector('h2').textContent = langData.title;
+      document.getElementById('printer-label').textContent = langData.selectPrinter;
+      
+      const printerDisplayText = document.getElementById('printer-display-text');
+      if (selectedPrinterId) {
+          const printer = printerMap[selectedPrinterId];
+          if (printer) {
+              const dist = (typeof printer.distance_km === "number") ? ` • ${printer.distance_km.toFixed(1)} ${langData.km}` : "";
+              // const statusText = printer.status === "online" ? "🟢" : "🔴"; 
+              const statusText = printer.status === "online" ? "🖨️" : "🖨️"; 
+              // const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
+              // printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+              printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+
+          }
+      } else {
+        printerDisplayText.textContent = langData.selectPlaceholder;
+      }
+      
+      document.getElementById('print-btn').textContent = langData.printBtn;
+      document.querySelector('#lang-text').textContent = lang.toUpperCase();
+
+      const hint = document.getElementById('geo-hint');
+      if (userCoords) hint.textContent = langData.usingLocation;
+      else hint.textContent = langData.noLocation;
+
+      const pdfCards = document.querySelectorAll('.pdf-card');
+      if (pdfCards.length > 0) {
+        pdfCards.forEach((card, index) => {
+          const totalPages = card.querySelector(`span.total-pages-display`).textContent.match(/\d+/)[0];
+          card.querySelector(`label.page-label`).textContent = langData.page;
+          card.querySelector(`input[name='page-option-${index}'][value='all']`).nextElementSibling.textContent =
+            `(${totalPages} ${lang === 'th' ? 'หน้า' : 'pages'})`;
+          card.querySelector(`input[name='page-option-${index}'][value='custom']`).nextElementSibling.textContent = langData.custom;
+          card.querySelector(`label.color-label`).textContent = langData.color;
+          card.querySelector(`span.color-text`).textContent = langData.color;
+          card.querySelector(`span.bw-text`).textContent = langData.bw;
+          card.querySelector('div.flex.items-center.space-x-4:nth-of-type(2) label').textContent = langData.copies;
+        });
+      }
+    }
+
+    async function getLocation(opts = { enableHighAccuracy: false, timeout: 8000, maximumAge: 30000 }) {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          return reject(new Error("Geolocation not supported"));
+        }
+        navigator.geolocation.getCurrentPosition(
+          pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          err => reject(err),
+          opts
+        );
+      });
+    }
+
+    // ===== LIFF / LINE ID =====
+    async function getLineUserIdViaLIFF() {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login(); // จะ redirect ไป login แล้วกลับมาหน้าเดิม
+          return null;
+        }
+        const profile = await liff.getProfile();
+        return profile.userId; // <-- ใช้ค่านี้แทน uid
+      } catch (err) {
+        console.error("LIFF init/profile error:", err);
+        return null;
+      }
+    }
+
+    // ===== PRINTERS =====
+    async function loadPrinters() {
+      const printerDisplay = document.getElementById("printer-select-display");
+      const printerDisplayText = document.getElementById("printer-display-text");
+      const selectedPrinterIdInput = document.getElementById("selected-printer-id");
+      const lang = isThai ? 'th' : 'en';
+      const t = translations[lang];
+
+      printerDisplay.classList.add("pointer-events-none", "opacity-50");
+      printerDisplayText.textContent = t.loading;
+      
+      let url = `${API_BASE}/get_all_printer`;
+      
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        data.printers.forEach(printer => {
+          printerMap[printer.printer_id] = printer;
+        });
+
+        const urlParams = new URLSearchParams(window.location.search);
+        selectedPrinterId = urlParams.get('selected_printer');
+        
+        if (selectedPrinterId && printerMap[selectedPrinterId]) {
+            const printer = printerMap[selectedPrinterId];
+            const dist = (typeof printer.distance_km === "number") ? ` • ${printer.distance_km.toFixed(1)} ${t.km}` : "";
+            // const statusText = printer.status === "online" ? "🟢" : "🔴";
+            const statusText = printer.status === "online" ? "🖨️" : "🖨️"; 
+            // const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
+            // printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+            printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+
+            selectedPrinterIdInput.value = selectedPrinterId;
+        } else {
+            printerDisplayText.textContent = t.selectPlaceholder;
+            selectedPrinterIdInput.value = "";
+        }
+
+        // 👇 เพิ่มบรรทัดนี้ให้เช็คสีแดงทุกครั้ง
+        checkPrinterSelection();
+
+        printerDisplay.classList.remove("pointer-events-none", "opacity-50");
+        
+        refreshPDFOptions();
+      } catch (err) {
+        printerDisplay.classList.remove("pointer-events-none", "opacity-50");
+        printerDisplayText.textContent = t.loadingFailed;
+      }
+    }
+
+
+    // ===== PDFs =====
+    function countPages(pages, totalPagesFromAPI) {
+      if (pages === "all") return totalPagesFromAPI || 1;
+      const pageSet = new Set();
+      pages.split(",").forEach(part => {
+        if (part.includes("-")) {
+          const [start, end] = part.split("-").map(Number);
+          for (let i = start; i <= end; i++) pageSet.add(i);
+        } else {
+          const num = Number(part);
+          if (!isNaN(num) && num >= 1 && num <= totalPagesFromAPI) pageSet.add(num);
+        }
+      });
+      return pageSet.size;
+    }
+
+    function validatePagesInput(input, totalPages) {
+      const value = input.value.trim();
+      if (!value) { input.classList.remove("border-red-500"); return true; }
+      let valid = true;
+      value.split(",").forEach(part => {
+        if (part.includes("-")) {
+          const [start, end] = part.split("-").map(Number);
+          if (isNaN(start) || isNaN(end) || start < 1 || end > totalPages || start > end) valid = false;
+        } else {
+          const num = Number(part);
+          if (isNaN(num) || num < 1 || num > totalPages) valid = false;
+        }
+      });
+      if (!valid) input.classList.add("border-red-500"); else input.classList.remove("border-red-500");
+      return valid;
+    }
+
+    async function loadPDFs(lineIdParam) {
+      const listUrl = `${API_BASE}/list-pdfs/${lineIdParam}`;
+      const langData = translations[isThai ? 'th' : 'en'];
+      try {
+        const res = await fetch(listUrl);
+        const data = await res.json();
+        const listDiv = document.getElementById("pdf-list");
+        listDiv.innerHTML = "";
+        if (data.files && data.files.length > 0) {
+          data.files.forEach((file, index) => {
+            const filename = file.filename;
+            const totalPages = file.total_pages || 1;
+            const fileId = `file-${index}`;
+            const card = document.createElement("div");
+            card.className = "pdf-card card p-6 space-y-4";
+
+            const header = document.createElement("div");
+            header.className = "flex items-center space-x-3";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.className = "w-5 h-5 text-blue-600 shrink-0 rounded focus:ring-blue-500";
+            checkbox.id = fileId; checkbox.name = "print-select"; checkbox.value = filename; checkbox.checked = true; checkbox.dataset.index = index + 1;
+
+            // const label = document.createElement("label");
+            // label.htmlFor = fileId; label.className = "text-base font-medium text-gray-800"; label.textContent = filename;
+            const label = document.createElement("label");
+            label.htmlFor = fileId; 
+            label.className = "text-base font-medium text-gray-800"; 
+            label.textContent = filename;
+
+
+            header.appendChild(checkbox); header.appendChild(label); card.appendChild(header);
+
+            const optionsGrid = document.createElement("div");
+            optionsGrid.className = "grid grid-cols-1 md:grid-cols-2 gap-4";
+
+            const pageSelect = document.createElement("div");
+            pageSelect.className = "space-y-2";
+            pageSelect.innerHTML = `
+              <label class="text-sm font-medium text-gray-700 page-label">${langData.page}</label>
+              <div class="space-y-2">
+                <div class="flex items-center space-x-2">
+                  <input type="radio" name="page-option-${index}" value="all" checked class="form-radio text-blue-600">
+                  <span class="text-sm total-pages-display">(${totalPages} ${isThai ? 'หน้า' : 'pages'})</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <input type="radio" name="page-option-${index}" value="custom" class="form-radio text-blue-600">
+                  <span class="text-sm">${langData.custom}</span>
+                  <input type="text" placeholder="ex. 1-5, 8" class="p-2 w-28 input-field text-sm text-gray-500 bg-gray-100" disabled>
+                </div>
+              </div>
+            `;
+            const allRadio = pageSelect.querySelector(`input[value="all"]`);
+            const customRadio = pageSelect.querySelector(`input[value="custom"]`);
+            const pageInput = pageSelect.querySelector("input[type='text']");
+            allRadio.addEventListener("change", () => { pageInput.disabled = true; pageInput.classList.add("bg-gray-100","text-gray-500"); pageInput.classList.remove("border-red-500"); });
+            customRadio.addEventListener("change", () => { pageInput.disabled = false; pageInput.classList.remove("bg-gray-100","text-gray-500"); });
+            pageInput.addEventListener("input", () => validatePagesInput(pageInput, totalPages));
+            optionsGrid.appendChild(pageSelect);
+
+            const colorCopies = document.createElement("div");
+            colorCopies.className = "space-y-2";
+            colorCopies.innerHTML = `
+              <div class="flex items-center space-x-4">
+                <label class="text-sm font-medium text-gray-700 color-label">${langData.color}</label>
+                <div class="flex items-center space-x-2">
+                  <input type="radio" name="color-${index}" value="color" class="form-radio text-blue-600">
+                  <span class="text-sm color-text">${langData.color}</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <input type="radio" name="color-${index}" value="bw" checked class="form-radio text-blue-600">
+                  <span class="text-sm bw-text">${langData.bw}</span>
+                </div>
+              </div>
+              <div class="flex items-center space-x-4">
+                <label class="text-sm font-medium text-gray-700">${langData.copies}</label>
+                <select class="p-2 w-20 input-field text-sm">
+                  ${[...Array(20).keys()].map(i => `<option value="${i + 1}"${i === 0 ? ' selected' : ''}>${i + 1}</option>`).join('')}
+                </select>
+              </div>
+            `;
+            optionsGrid.appendChild(colorCopies);
+            card.appendChild(optionsGrid);
+
+            checkbox.addEventListener("change", () => {
+              const isChecked = checkbox.checked;
+              card.classList.toggle("opacity-50", !isChecked);
+              card.querySelectorAll("input, select, label, span").forEach(el => {
+                if (el !== checkbox && el.tagName !== 'LABEL' && el.tagName !== 'SPAN') el.disabled = !isChecked;
+              });
+            });
+
+            listDiv.appendChild(card);
+          });
+
+          refreshPDFOptions();
+        } else {
+          listDiv.innerHTML = `<p class="text-red-600 text-center font-semibold whitespace-pre-line">${langData.noFiles}</p>`;
+          // listDiv.innerHTML = `<p class='text-red-600 text-center'>${langData.noFiles}</p>`;
+        }
+      } catch (err) {
+        document.getElementById("pdf-list").innerHTML = `<p class='text-red-600 text-center'>${langData.loadingFailed}: ${err}</p>`;
+      }
+    }
+
+    function refreshPDFOptions() {
+      const printerId = document.getElementById("selected-printer-id").value;
+      if (!printerId) return;
+      const printer = printerMap[printerId];
+      if (!printer) return;
+      document.querySelectorAll(".pdf-card").forEach((card, idx) => {
+        const colorColor = card.querySelector(`input[name='color-${idx}'][value='color']`);
+        const colorLabel = colorColor?.nextElementSibling;
+        const colorBW = card.querySelector(`input[name='color-${idx}'][value='bw']`);
+        if (printer.bw_only) {
+          if (colorColor) { 
+            colorColor.disabled = true; 
+            if (colorLabel) colorLabel.classList.add("text-gray-400"); 
+          }
+          if (colorBW) colorBW.checked = true;
+        } else {
+          if (colorColor) { 
+            colorColor.disabled = false; 
+            if (colorLabel) colorLabel.classList.remove("text-gray-400"); 
+          }
+        }
+      });
+    }
+
+    // ===== PAYMENT / QR =====
+    function startCountdown(durationInSeconds) {
+      let timer = durationInSeconds;
+      const countdownDisplay = document.getElementById('countdown-display');
+      if (!countdownDisplay) return;
+      function updateTimer() {
+        const minutes = parseInt(timer / 60, 10);
+        const seconds = parseInt(timer % 60, 10);
+        const displayMinutes = minutes < 10 ? "0" + minutes : minutes;
+        const displaySeconds = seconds < 10 ? "0" + seconds : seconds;
+        countdownDisplay.textContent = `${displayMinutes}:${displaySeconds}`;
+        if (timer <= 0) { 
+          clearInterval(countdownInterval); 
+          countdownDisplay.textContent = isThai ? 'หมดเวลา' : 'Timeout'; 
+          return; 
+        }
+        timer--;
+      }
+      clearInterval(countdownInterval);
+      updateTimer();
+      countdownInterval = setInterval(updateTimer, 1000);
+    }
+
+    function createPaymentView(payload, qrUrl, refId) {
+      const langData = translations[isThai ? 'th' : 'en'];
+      const paymentStatusCard = document.getElementById("payment-status-card");
+      const jobSummaryList = document.getElementById("job-summary-list");
+      const printJobSummaryHeading = document.getElementById("print-job-summary-heading");
+      
+      paymentStatusCard.innerHTML = `
+        <h3 class="text-xl font-bold text-gray-800 mb-6">${langData.scanToPay}</h3>
+        <p class="text-lg font-semibold text-gray-700 mb-2">${langData.totalPrice} 
+          <strong class="text-2xl font-bold text-blue-600">
+            ${currentTotalAmount.toFixed(2)} ${langData.currency}
+          </strong>
+        </p>
+        <div class="bg-white p-4 rounded-xl shadow-inner">
+          <img src="${qrUrl}" alt="QR Code" class="w-48 h-48">
+        </div>
+        <div id="payment-status-container" class="mt-6 text-center">
+          <p id="payment-status" class="text-xl font-bold text-blue-600">${langData.waitingPayment}</p>
+          <p id="countdown-display" class="mt-2 text-sm font-medium text-gray-500"></p>
+          <p class="text-xs text-gray-400 mt-2">Ref ID: ${refId}</p>
+        </div>
+      `;
+
+      if (printJobSummaryHeading) printJobSummaryHeading.textContent = langData.printJobSummary;
+      document.getElementById("printer-name-summary").textContent = `${langData.printer} ${currentPrinterLocation}`;
+      document.getElementById("total-price-summary").textContent = `${langData.totalPrice} ${currentTotalAmount.toFixed(2)} ${langData.currency}`;
+      document.getElementById("total-page-count-summary").textContent = `${langData.totalPageCount} ${currentTotalPages} ${isThai ? 'หน้า' : 'pages'}`;
+      
+      let jobSummaryHtml = '';
+      currentPrintJobs.forEach(job => {
+        const colorText = job.color === 'bw' ? langData.bw : langData.color;
+        const pagesText = job.pages === 'all' ? '' : `${langData.page} ${job.pages}, `;
+        jobSummaryHtml += `
+          <div class="py-2 border-b border-gray-200 last:border-b-0">
+            <p class="font-semibold text-gray-800">${job.filename}</p>
+            <ul class="list-disc list-inside text-sm text-gray-500 mt-1">
+              <li>${pagesText}${langData.printCopies} ${job.copies} ${langData.version}</li>
+              <li>${langData.printType} ${colorText}</li>
+              <li>${langData.pricePerPage} ${job.price_per_page.toFixed(2)} ${langData.currency}</li>
+              <li>${langData.totalPrice}: ${job.total_price.toFixed(2)} ${langData.currency}</li>
+            </ul>
+          </div>
+        `;
+      });
+      jobSummaryList.innerHTML = jobSummaryHtml;
+
+      const printBtn = document.getElementById("print-btn");
+      printBtn.textContent = langData.editBtn;
+      printBtn.classList.remove("bg-blue-600","hover:bg-blue-700");
+      printBtn.classList.add("bg-red-600","hover:bg-red-700");
+      printBtn.setAttribute("onclick", "cancelPrint()");
+      startCountdown(180);
+    }
+
+    async function submitPrint() {
+      const langData = translations[isThai ? 'th' : 'en'];
+      const printerId = document.getElementById("selected-printer-id").value;
+      const printer = printerMap[printerId];
+      const paymentView = document.getElementById("payment-view");
+      const configView = document.getElementById("config-view");
+
+      if (!printer) { alert(langData.noPrinterSelected); return; }
+
+      currentPrintJobs = [];
+      let total = 0, totalPages = 0;
+      for (const card of document.querySelectorAll(".pdf-card")) {
+        const checkbox = card.querySelector("input[name='print-select']");
+        if (checkbox && checkbox.checked) {
+          const index = checkbox.dataset.index;
+          const totalPagesFromAPI = parseInt(card.querySelector(`span.total-pages-display`).textContent.match(/\d+/)[0]) || 1;
+          const allPages = card.querySelector(`input[name='page-option-${index - 1}'][value='all']`).checked;
+          const pageInput = card.querySelector("input[type='text']");
+          const pages = allPages ? "all" : pageInput.value.trim();
+          if (!allPages && !validatePagesInput(pageInput, totalPagesFromAPI)) {
+            alert(langData.invalidPageInput.replace("{filename}", checkbox.value)); return;
+          }
+          const color = card.querySelector(`input[name='color-${index - 1}']:checked`).value;
+          const copies = parseInt(card.querySelector("select").value) || 1;
+          const pageCount = countPages(pages, totalPagesFromAPI);
+          const pricePerPage = color === "bw" ? printer.bw_price : printer.color_price;
+          const jobPrice = pageCount * copies * pricePerPage;
+          total += jobPrice; totalPages += pageCount * copies;
+          currentPrintJobs.push({
+            file_id: parseInt(index),
+            filename: checkbox.value,
+            pages: pages || "all",
+            color: color,
+            copies: copies || 1,
+            page_count: pageCount,
+            price_per_page: pricePerPage,
+            total_price: jobPrice
+          });
+        }
+      }
+      if (currentPrintJobs.length === 0) { alert(langData.noFileSelected); return; }
+
+      currentTotalAmount = parseFloat(total.toFixed(2));
+      currentTotalPages = totalPages;
+      currentPrinterLocation = printer.location_name;
+
+      const configViewEl = document.getElementById("config-view");
+      const paymentViewEl = document.getElementById("payment-view");
+      configViewEl.classList.add("hidden");
+      paymentViewEl.classList.remove("hidden");
+      
+      const paymentStatusCard = document.getElementById("payment-status-card");
+      paymentStatusCard.innerHTML = `
+        <div class="p-6 flex flex-col items-center justify-center text-center space-y-4">
+          <p class="text-base font-medium text-gray-700">${langData.totalAmount} <strong class="text-blue-600">${currentTotalAmount.toFixed(2)} ${langData.currency}</strong></p>
+          <p class="text-base font-medium text-gray-700">${langData.totalPages} <strong class="text-blue-600">${currentTotalPages} ${isThai ? 'หน้า' : 'pages'}</strong></p>
+          <p class="text-sm text-gray-500">${langData.creatingQR}</p>
+        </div>
+      `;
+
+      try {
+        const query = new URLSearchParams({
+          amount: currentTotalAmount.toFixed(2),
+          printer_id: printer.printer_id,
+          line_id: lineId,
+          total_pages: currentTotalPages,
+          jobs: JSON.stringify(currentPrintJobs)
+        });
+        console.log("Submitting print job with query:", query.toString());
+        const res = await fetch(`${API_BASE}/generate_qr?${query.toString()}`);
+        const blob = await res.blob();
+        const qrUrl = URL.createObjectURL(blob);
+        
+        currentRefId = res.headers.get("X-Ref-Id");  // ใช้ ref_id เป็นหลัก
+
+        if (paymentCheckInterval) clearInterval(paymentCheckInterval);
+        paymentCheckInterval = setInterval(checkPaymentStatus, 1000);
+
+        const payload = { printer_location: currentPrinterLocation, total_amount: currentTotalAmount, total_pages: currentTotalPages };
+        createPaymentView(payload, qrUrl, currentRefId);
+
+      } catch (err) {
+        paymentStatusCard.innerHTML = `<div class="bg-white border border-red-300 rounded p-4 text-red-700">${langData.qrFailed}: ${err}</div>`;
+      }
+    }
+
+    async function cancelPrint() {
+      if (currentRefId) {
+        try { 
+          await fetch(`${API_BASE}/cancel_payment/${currentRefId}`, { method: "POST" }); 
+        } catch (err) { 
+          console.error("cancel error", err); 
+        }
+      }
+      clearInterval(paymentCheckInterval); 
+      clearInterval(countdownInterval);
+      currentRefId = null; isPaymentSuccessView = false;
+      const langData = translations[isThai ? 'th' : 'en'];
+      const configView = document.getElementById("config-view");
+      const paymentView = document.getElementById("payment-view");
+      const printBtn = document.getElementById("print-btn");
+      configView.classList.remove("hidden"); 
+      paymentView.classList.add("hidden");
+      printBtn.textContent = langData.printBtn;
+      printBtn.classList.remove("bg-red-600","hover:bg-red-700");
+      printBtn.classList.add("bg-blue-600","hover:bg-blue-700");
+      printBtn.setAttribute("onclick", "submitPrint()");
+    }
+    
+    async function checkPaymentStatus() {
+      if (!currentRefId) return;
+      try {
+        const res = await fetch(`${API_BASE}/check_payment/${currentRefId}`);
+        const data = await res.json();
+        const langData = translations[isThai ? 'th' : 'en'];
+        if (data.status !== "waiting" && data.status !== "cancelled") {
+          clearInterval(paymentCheckInterval);
+          clearInterval(countdownInterval);
+          const paymentStatusCard = document.getElementById("payment-status-card");
+          if (paymentStatusCard && !isPaymentSuccessView) {
+            paymentStatusCard.innerHTML = `
+              <img src="/images/payment-success.png" alt="Payment Success" class="w-32 h-32 mb-4">
+              <h3 class="text-2xl font-bold text-green-600">${langData.paymentSuccess}</h3>
+              <p class="mt-2 text-sm font-medium text-gray-500">${langData.jobSent}</p>
+            `;
+            isPaymentSuccessView = true;
+          }
+
+          // ย้ายปุ่มไป footer → กลับหน้าแรก โดยไม่พ่วง uid
+          const footer = document.querySelector(".fixed-footer .max-w-xl");
+          footer.innerHTML = `
+            <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
+              ${langData.backToHome}
+            </button>
+          `;
+        }
+      } catch (err) {
+        console.error("checkPayment error", err);
+      }
+    }
+
+    function updatePaymentView() {
+      const lang = isThai ? 'th' : 'en';
+      const langData = translations[lang];
+
+      if (isPaymentSuccessView) {
+        const paymentStatusCard = document.getElementById("payment-status-card");
+        paymentStatusCard.innerHTML = `
+          <img src="/images/payment-success.png" alt="Payment Success" class="w-32 h-32 mb-4">
+          <h3 class="text-2xl font-bold text-green-600">${langData.paymentSuccess}</h3>
+          <p class="mt-2 text-sm font-medium text-gray-500">${langData.jobSent}</p>
+        `;
+
+        // อัปเดต footer เป็นปุ่มกลับบ้าน
+        const footer = document.querySelector(".fixed-footer .max-w-xl");
+        footer.innerHTML = `
+          <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
+            ${langData.backToHome}
+          </button>
+        `;
+      } else {
+        const paymentStatusEl = document.getElementById("payment-status");
+        const paymentStatusCardTitle = document.querySelector("#payment-status-card h3");
+        const printJobSummaryHeading = document.getElementById("print-job-summary-heading");
+        const paymentAmountEl = document.querySelector("#payment-status-card .text-lg");
+        if (paymentStatusEl) paymentStatusEl.textContent = langData.waitingPayment;
+        if (paymentStatusCardTitle) paymentStatusCardTitle.textContent = langData.scanToPay;
+        if (printJobSummaryHeading) printJobSummaryHeading.textContent = langData.printJobSummary;
+        if (paymentAmountEl) paymentAmountEl.innerHTML = `${langData.totalPrice} <strong class="text-2xl font-bold text-blue-600">${currentTotalAmount.toFixed(2)} ${langData.currency}</strong>`;
+      }
+
+      const printerSummaryEl = document.getElementById("printer-name-summary");
+      const priceSummaryEl = document.getElementById("total-price-summary");
+      const pageSummaryEl = document.getElementById("total-page-count-summary");
+      if (printerSummaryEl) printerSummaryEl.textContent = `${langData.printer} ${currentPrinterLocation}`;
+      if (priceSummaryEl) priceSummaryEl.textContent = `${langData.totalPrice} ${currentTotalAmount.toFixed(2)} ${langData.currency}`;
+      if (pageSummaryEl) pageSummaryEl.textContent = `${langData.totalPageCount} ${currentTotalPages} ${isThai ? 'หน้า' : 'pages'}`;
+
+      let jobSummaryHtml = '';
+      currentPrintJobs.forEach(job => {
+        const colorText = job.color === 'bw' ? langData.bw : langData.color;
+        const pagesText = job.pages === 'all' ? '' : `${langData.page} ${job.pages}, `;
+        jobSummaryHtml += `
+          <div class="py-2 border-b border-gray-200 last:border-b-0">
+            <p class="font-semibold text-gray-800">${job.filename}</p>
+            <ul class="list-disc list-inside text-sm text-gray-500 mt-1">
+              <li>${pagesText}${langData.printCopies} ${job.copies} ${langData.version}</li>
+              <li>${langData.printType} ${colorText}</li>
+              <li>${langData.pricePerPage} ${job.price_per_page.toFixed(2)} ${langData.currency}</li>
+              <li>${langData.totalPrice}: ${job.total_price.toFixed(2)} ${langData.currency}</li>
+            </ul>
+          </div>
+        `;
+      });
+      document.getElementById("job-summary-list").innerHTML = jobSummaryHtml;
+
+      const printBtn = document.getElementById("print-btn");
+      if (printBtn) printBtn.textContent = langData.editBtn;
+    }
+
+    async function uploadFile() {
+      const fileInput = document.getElementById("file-input");
+      if (!fileInput.files.length) {
+        return; // ไม่เลือกไฟล์ก็ไม่ทำอะไร
+      }
+
+      const file = fileInput.files[0];
+      if (file.type !== "application/pdf") {
+        alert(isThai ? "รองรับเฉพาะไฟล์ PDF เท่านั้น" : "Only PDF files are supported");
+        fileInput.value = "";
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("uid", lineId);
+
+      try {
+        // แจ้งสถานะกำลังอัปโหลด
+        document.getElementById("pdf-list").innerHTML =
+          `<p class="text-blue-600 text-center">${isThai ? "⏳ กำลังอัปโหลด..." : "⏳ Uploading..."}</p>`;
+
+        const res = await fetch(`${API_BASE}/upload-pdf`, {
+          method: "POST",
+          body: formData
+        });
+        if (!res.ok) throw new Error("Upload failed: " + res.status);
+
+        const result = await res.json();
+        console.log("✅ Uploaded:", result);
+
+        // โหลดรายการ PDF ใหม่
+        await loadPDFs(lineId);
+        fileInput.value = ""; // reset file input
+      } catch (err) {
+        console.error("Upload error:", err);
+        alert((isThai ? "อัปโหลดล้มเหลว: " : "Upload failed: ") + err.message);
+      }
+    }
+
+
+
+    // ===== Toggle Language =====
+    document.getElementById('lang-toggle').addEventListener('click', () => {
+      isThai = !isThai;
+      const lang = isThai ? 'th' : 'en';
+      document.querySelector('#lang-text').textContent = isThai ? 'TH' : 'EN';
+      if (document.getElementById('payment-view').classList.contains('hidden')) {
+        updateLanguage(lang);
+      } else {
+        updatePaymentView();
+      }
+    });
+
+    // ===== ENTRY POINT =====
+    document.addEventListener('DOMContentLoaded', async () => {
+      updateLanguage(isThai ? 'th' : 'en');
+
+      try {
+        await loadConfig();
+        // 1) อ่าน LINE UID ผ่าน LIFF
+        lineId = await getLineUserIdViaLIFF();
+
+        // 2) โหลดรายการเครื่องพิมพ์ (ไม่ต้องรอ lineId)
+        await loadPrinters();
+
+        // 3) ถ้าอ่าน lineId ได้ → โหลดรายการไฟล์ และตั้งลิงก์ประวัติ (ไม่พ่วง uid)
+        if (lineId) {
+          await loadPDFs(lineId);
+          const historyLink = document.getElementById('history-link');
+          if (historyLink) historyLink.href = 'historys.html';
+        } else {
+          document.getElementById('pdf-list').innerHTML =
+            `<p class='text-red-600 text-center'>${translations.th.invalidUrl}</p>`;
+        }
+      } catch (e) {
+        console.error(e);
+        document.getElementById('pdf-list').innerHTML =
+          `<p class='text-red-600 text-center'>เกิดข้อผิดพลาดในการอ่าน LINE UID</p>`;
+      }
+
+      window.addEventListener('load', checkPrinterSelection);
+    });
+  </script>
+</body>
+</html>
