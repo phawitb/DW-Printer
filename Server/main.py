@@ -17,6 +17,8 @@ import json
 from pytz import timezone
 from pathlib import Path
 from datetime import datetime, timedelta
+from fastapi import UploadFile, File, Form
+
 
 def load_config():
     path = Path(__file__).resolve().parent / "static" / "config.json"
@@ -690,3 +692,25 @@ async def sent_feedback(request: Request):
     except Exception as e:
         print(f"Error in sent_feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+# === Serve guide.html ===
+@app.get("/guide.html")
+def serve_guide():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "guide.html"))
+
+
+# === API: Upload PDF ===
+@app.post("/upload-pdf")
+async def upload_pdf(file: UploadFile = File(...), uid: str = Form(...)):
+    try:
+        user_dir = os.path.join(PDF_DIR, uid)
+        os.makedirs(user_dir, exist_ok=True)
+
+        file_path = os.path.join(user_dir, file.filename)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+
+        return {"status": "ok", "filename": file.filename}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}

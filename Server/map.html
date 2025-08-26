@@ -112,6 +112,15 @@
       shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
       iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
     });
+    const yellowIcon = L.icon({
+      iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-gold.png",
+      shadowUrl: "https://unpkg.com/leaflet/dist/images/marker-shadow.png",
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
+    });
+
 
     function updateLanguage(lang) {
       const langData = translations[lang];
@@ -274,42 +283,52 @@
         }).addTo(map);
       }
 
-      map.eachLayer(layer => { if (layer instanceof L.Marker || layer instanceof L.CircleMarker) map.removeLayer(layer); });
+      // ล้าง marker เก่า
+      map.eachLayer(layer => { 
+        if (layer instanceof L.Marker || layer instanceof L.CircleMarker) map.removeLayer(layer); 
+      });
 
+      // แสดงตำแหน่งผู้ใช้
       if (userCoords) {
         L.circleMarker([userCoords.lat, userCoords.lon], {
           color: "white", fillColor: "#2563EB", fillOpacity: 1, radius: 8, weight: 2
         }).addTo(map).bindPopup("📍 " + (isThai ? "คุณอยู่ที่นี่" : "You are here"));
-        
         map.setView([userCoords.lat, userCoords.lon], 14);
       }
 
+      // วาด printer
       printers.forEach(printer => {
         if (printer.lat && printer.lon) {
-          let statusText, statusColor;
+          let marker, popupContent, statusText, icon;
+
           if (printer.status === 'online') {
             if (isPrinterOpen(printer)) {
-              statusText = `<b style="color:green;">${t.online}</b>`;
+              statusText = `<span style="color:green;">${t.online}</span>`;
+              icon = greenIcon;
             } else {
-              statusText = `<b style="color:orange;">${t.outside}</b>`;
+              statusText = `<span style="color:orange;">${t.outside}</span>`;
+              icon = yellowIcon;
             }
           } else {
-            statusText = `<b style="color:red;">${t.offline}</b>`;
+            statusText = `<span style="color:red;">${t.offline}</span>`;
+            icon = redIcon;
           }
 
-          const typeText = printer.bw_only ? `<span class="font-bold">${t.bw_printer}</span>` : `<span class="rainbow-text font-bold">${t.color_printer}</span>`;
+          const typeText = printer.bw_only 
+            ? `<span class="font-bold">${t.bw_printer}</span>` 
+            : `<span class="rainbow-text font-bold">${t.color_printer}</span>`;
+
           const priceTextBw = `${t.bw}: ${printer.bw_price} ${t.baht}`;
           const priceTextColor = printer.bw_only ? '' : `<br>${t.color}: ${printer.color_price} ${t.baht}`;
-          const operatingHoursHtml = printer.open_time && printer.close_time 
-                ? `🕒 ${t.operating_hours}: ${printer.open_time} - ${printer.close_time}<br>` 
-                : '';
-          const navButtonHtml = `<a href="https://www.google.com/maps/dir/?api=1&destination=${printer.lat},${printer.lon}" target="_blank" class="nav-btn" style="width: 100%; justify-content: center;">
-                                   <img src="${navigateIconPath}" alt="nav"/> <span>${t.nav}</span>
-                                 </a>`;
+          const operatingHoursHtml = (printer.open_time && printer.close_time) 
+            ? `🕒 ${t.operating_hours}: ${printer.open_time} - ${printer.close_time}<br>` 
+            : '';
 
-          let marker, popupContent;
+          const navButtonHtml = `<a href="https://www.google.com/maps/dir/?api=1&destination=${printer.lat},${printer.lon}" target="_blank" class="nav-btn" style="width: 100%; justify-content: center;">
+                                  <img src="${navigateIconPath}" alt="nav"/> <span>${t.nav}</span>
+                                </a>`;
+
           if (printer.status === 'online') {
-            marker = L.marker([printer.lat, printer.lon], { icon: greenIcon }).addTo(map);
             const selectButtonHtml = `<button onclick="selectPrinter('${printer.printer_id}')" class="select-btn" style="width: 100%; justify-content: center;">
                                         <img src="${printerIconPath}" alt="printer"/> <span>${t.select}</span>
                                       </button>`;
@@ -325,7 +344,6 @@
                 ${navButtonHtml}
               </div>`;
           } else {
-            marker = L.marker([printer.lat, printer.lon], { icon: redIcon }).addTo(map);
             popupContent = `
               <b>${printer.location_name}</b><br>
               ${typeText}<br>
@@ -337,41 +355,23 @@
                 ${navButtonHtml}
               </div>`;
           }
+
+          marker = L.marker([printer.lat, printer.lon], { icon }).addTo(map);
           marker.bindPopup(popupContent);
         }
       });
     }
 
+
     function selectPrinter(printerId) {
       const printer = printerMap[printerId];
       if (!printer) return;
-
-      const proceedAction = () => {
-        const params = new URLSearchParams();
-        if (lineId) params.set('uid', lineId);
-        params.set('selected_printer', printerId);
-        window.location.href = `index.html?${params.toString()}`;
-      };
-
-      if (printer.open_time && printer.close_time) {
-        const lang = isThai ? 'th' : 'en';
-        const t = translations[lang];
-        if (isPrinterOpen(printer)) {
-          proceedAction();
-        } else {
-          let message = t.outside_hours_confirm
-              .replace('${open_time}', printer.open_time)
-              .replace('${close_time}', printer.close_time);
-          if (confirm(message)) {
-            proceedAction();
-          }
-        }
-      } else {
-        proceedAction();
-      }
+      const params = new URLSearchParams();
+      if (lineId) params.set('uid', lineId);
+      params.set('selected_printer', printerId);
+      window.location.href = `index.html?${params.toString()}`;
     }
 
-    // --- Event Listeners ---
     document.getElementById('list-tab').addEventListener('click', () => {
       document.getElementById('list-view').classList.remove('hidden');
       document.getElementById('map-view').classList.add('hidden');
@@ -397,11 +397,9 @@
       loadPrinters();
     });
 
-    // --- Initial Load ---
     loadPrinters();
     updateLanguage('th');
 
-    // ✅ Default tab check from URL
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("default") === "map") {
       document.getElementById("map-tab").click();

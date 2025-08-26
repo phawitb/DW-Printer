@@ -31,6 +31,12 @@
     .hidden { display: none; }
     #logo-container { display: flex; align-items: center; }
     #logo-container img { height: 4em; margin-right: 0.5rem; box-shadow: none; border-radius: 0; vertical-align: middle; }
+
+    .border-red {
+      border: 2px solid #ef4444 !important; /* tailwind red-500 */
+    }
+
+
   </style>
 </head>
 <body class="bg-gray-100 p-6 md:p-12">
@@ -64,11 +70,37 @@
           <span id="geo-hint" class="text-xs text-gray-500"></span>
         </div>
         <!-- เปลี่ยน onclick: ไม่ส่ง uid ใน URL -->
-        <div id="printer-select-display" class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer" onclick="window.location.href='map.html'" style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
+        <!-- <div id="printer-select-display" class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer" onclick="window.location.href='map.html'" style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
+          <span id="printer-display-text" class="text-gray-500">-- กรุณาเลือกเครื่องพิมพ์ --</span>
+          <input type="hidden" id="selected-printer-id" value="">
+        </div> -->
+        <div id="printer-select-display" 
+            class="w-full p-4 input-field modern-select flex justify-between items-center cursor-pointer"
+            onclick="window.location.href='map.html'" 
+            style="border: 2px solid #a4a8af; border-radius: 0.5rem;">
           <span id="printer-display-text" class="text-gray-500">-- กรุณาเลือกเครื่องพิมพ์ --</span>
           <input type="hidden" id="selected-printer-id" value="">
         </div>
+
       </div>
+
+      <!-- <div class="mt-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Upload PDF</label>
+        <input id="file-input" type="file" accept="application/pdf" 
+               class="block w-full text-sm text-gray-700 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+        <button onclick="uploadFile()" 
+                class="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+          อัปโหลดไฟล์
+        </button>
+      </div> -->
+      <div class="mt-6">
+        <label class="block text-sm font-medium text-gray-700 mb-2">Upload PDF</label>
+        <input id="file-input" type="file" accept="application/pdf"
+               onchange="uploadFile()" 
+               class="block w-full text-sm text-gray-700 border border-gray-300 rounded-lg cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      
 
       <div id="pdf-list" class="mt-8 space-y-6">⏳ กำลังโหลด...</div>
     </div>
@@ -140,7 +172,7 @@
         bw: "ขาวดำ",
         copies: "สำเนา:",
         printBtn: "ตกลง",
-        editBtn: "แก้ไข",
+        editBtn: "ยกเลิก",
         totalAmount: "ยอดชำระทั้งหมด:",
         totalPages: "จำนวนหน้าทั้งหมด:",
         creatingQR: "กำลังสร้าง QR Code...",
@@ -183,7 +215,7 @@
         bw: "B&W",
         copies: "Copies:",
         printBtn: "OK",
-        editBtn: "Edit",
+        editBtn: "Cancel",
         totalAmount: "Total Amount:",
         totalPages: "Total Pages:",
         creatingQR: "Generating QR Code...",
@@ -215,15 +247,37 @@
     };
 
     // ===== UI HELPERS =====
+    // function checkPrinterSelection() {
+    //   const printerId = document.getElementById("selected-printer-id").value;
+    //   const printerLabel = document.getElementById("printer-label");
+    //   if (!printerId) {
+    //     printerLabel.classList.add("text-red-500");
+    //   } else {
+    //     printerLabel.classList.remove("text-red-500");
+    //   }
+    // }
     function checkPrinterSelection() {
       const printerId = document.getElementById("selected-printer-id").value;
       const printerLabel = document.getElementById("printer-label");
+      const printerBox = document.getElementById("printer-select-display");
+      const printerDisplayText = document.getElementById("printer-display-text");
+
       if (!printerId) {
         printerLabel.classList.add("text-red-500");
+        printerBox.classList.add("border-red");
+        printerDisplayText.classList.add("text-red-500");
+        printerDisplayText.classList.remove("text-black");    // ❌ เอาสีดำออก
+        printerDisplayText.classList.add("text-gray-500");    // ✅ placeholder เป็นสีเทา
       } else {
         printerLabel.classList.remove("text-red-500");
+        printerBox.classList.remove("border-red");
+        printerDisplayText.classList.remove("text-red-500", "text-gray-500");
+        printerDisplayText.classList.add("text-black");       // ✅ เมื่อเลือกแล้วเป็นสีดำ
       }
     }
+
+
+
 
     function updateLanguage(lang) {
       const langData = translations[lang];
@@ -235,9 +289,12 @@
           const printer = printerMap[selectedPrinterId];
           if (printer) {
               const dist = (typeof printer.distance_km === "number") ? ` • ${printer.distance_km.toFixed(1)} ${langData.km}` : "";
-              const statusText = printer.status === "online" ? "🟢" : "🔴";
-              const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
-              printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+              // const statusText = printer.status === "online" ? "🟢" : "🔴"; 
+              const statusText = printer.status === "online" ? "🖨️" : "🖨️"; 
+              // const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
+              // printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+              printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+
           }
       } else {
         printerDisplayText.textContent = langData.selectPlaceholder;
@@ -322,14 +379,20 @@
         if (selectedPrinterId && printerMap[selectedPrinterId]) {
             const printer = printerMap[selectedPrinterId];
             const dist = (typeof printer.distance_km === "number") ? ` • ${printer.distance_km.toFixed(1)} ${t.km}` : "";
-            const statusText = printer.status === "online" ? "🟢" : "🔴";
-            const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
-            printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+            // const statusText = printer.status === "online" ? "🟢" : "🔴";
+            const statusText = printer.status === "online" ? "🖨️" : "🖨️"; 
+            // const operatingHours = printer.open_time && printer.close_time ? ` (${printer.open_time} - ${printer.close_time})` : "";
+            // printerDisplayText.textContent = `${statusText} ${printer.location_name}${operatingHours}${dist}`;
+            printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+
             selectedPrinterIdInput.value = selectedPrinterId;
         } else {
             printerDisplayText.textContent = t.selectPlaceholder;
             selectedPrinterIdInput.value = "";
         }
+
+        // 👇 เพิ่มบรรทัดนี้ให้เช็คสีแดงทุกครั้ง
+        checkPrinterSelection();
 
         printerDisplay.classList.remove("pointer-events-none", "opacity-50");
         
@@ -339,6 +402,7 @@
         printerDisplayText.textContent = t.loadingFailed;
       }
     }
+
 
     // ===== PDFs =====
     function countPages(pages, totalPagesFromAPI) {
@@ -774,6 +838,48 @@
       const printBtn = document.getElementById("print-btn");
       if (printBtn) printBtn.textContent = langData.editBtn;
     }
+
+    async function uploadFile() {
+      const fileInput = document.getElementById("file-input");
+      if (!fileInput.files.length) {
+        return; // ไม่เลือกไฟล์ก็ไม่ทำอะไร
+      }
+
+      const file = fileInput.files[0];
+      if (file.type !== "application/pdf") {
+        alert(isThai ? "รองรับเฉพาะไฟล์ PDF เท่านั้น" : "Only PDF files are supported");
+        fileInput.value = "";
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("uid", lineId);
+
+      try {
+        // แจ้งสถานะกำลังอัปโหลด
+        document.getElementById("pdf-list").innerHTML =
+          `<p class="text-blue-600 text-center">${isThai ? "⏳ กำลังอัปโหลด..." : "⏳ Uploading..."}</p>`;
+
+        const res = await fetch(`${API_BASE}/upload-pdf`, {
+          method: "POST",
+          body: formData
+        });
+        if (!res.ok) throw new Error("Upload failed: " + res.status);
+
+        const result = await res.json();
+        console.log("✅ Uploaded:", result);
+
+        // โหลดรายการ PDF ใหม่
+        await loadPDFs(lineId);
+        fileInput.value = ""; // reset file input
+      } catch (err) {
+        console.error("Upload error:", err);
+        alert((isThai ? "อัปโหลดล้มเหลว: " : "Upload failed: ") + err.message);
+      }
+    }
+
+
 
     // ===== Toggle Language =====
     document.getElementById('lang-toggle').addEventListener('click', () => {
