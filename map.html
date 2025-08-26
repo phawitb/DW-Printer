@@ -25,6 +25,11 @@
     .select-btn img { width:16px; height:16px; }
     @keyframes rainbow { 0%{color:red;} 14%{color:orange;} 28%{color:yellow;} 42%{color:green;} 57%{color:blue;} 71%{color:indigo;} 85%{color:violet;} 100%{color:red;} }
     .rainbow-text { animation: rainbow 4s linear infinite; }
+    .offline {
+      filter: grayscale(100%);
+      opacity: 0.7; /* ทำให้ดูหม่นลง */
+    }
+
   </style>
 </head>
 <body class="bg-gray-100 p-6 md:p-12">
@@ -211,7 +216,9 @@
       listView.innerHTML = '';
       printers.forEach(printer => {
         const card = document.createElement("div");
-        card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
+        // card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
+        card.className = `card p-4 space-y-3 ${printer.status === 'offline' ? 'offline bg-gray-50' : ''}`;
+
         
         let statusText, statusClass;
         if (printer.status === 'online') {
@@ -260,16 +267,29 @@
              </a>`
           : '';
 
+        // card.innerHTML = `
+        //     <div class="flex items-start justify-between">
+        //         <h4 class="text-lg font-semibold">${printer.location_name}</h4>
+        //         <span class="text-sm font-medium ${statusClass}">${statusText}</span>
+        //     </div>
+        //     ${typeAndPriceHtml}
+        //     <div class="flex gap-2 pt-2">
+        //         ${selectBtn}
+        //         ${navBtn}
+        //     </div>`;
+
         card.innerHTML = `
-            <div class="flex items-start justify-between">
-                <h4 class="text-lg font-semibold">${printer.location_name}</h4>
-                <span class="text-sm font-medium ${statusClass}">${statusText}</span>
-            </div>
-            ${typeAndPriceHtml}
-            <div class="flex gap-2 pt-2">
-                ${selectBtn}
-                ${navBtn}
-            </div>`;
+        <div>
+            <h4 class="text-lg font-semibold ${statusClass}">${printer.location_name}</h4>
+            <span class="text-sm font-medium ${statusClass}">${statusText}</span>
+        </div>
+        ${typeAndPriceHtml}
+        <div class="flex gap-2 pt-2">
+            ${selectBtn}
+            ${navBtn}
+        </div>`;
+
+
         listView.appendChild(card);
       });
     }
