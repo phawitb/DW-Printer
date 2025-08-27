@@ -762,3 +762,24 @@ def get_config():
     if not doc:
         return {"frontend": {"use_payment": "True"}}  # ค่า default
     return {"frontend": doc.get("frontend", {})}
+
+
+@app.post("/update_printer_url")
+def update_printer_url(
+    printer_id: str = Form(...),
+    url: str = Form(...)
+):
+    try:
+        result = collection_printer.update_one(
+            {"printer_id": printer_id},
+            {"$set": {"url": url}}
+        )
+
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+
+        return {"status": "ok", "message": f"Updated URL for {printer_id} to {url}"}
+
+    except Exception as e:
+        print(f"❌ Error in update_printer_url: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
