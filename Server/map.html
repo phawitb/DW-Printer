@@ -158,10 +158,12 @@
 
       let url = `${API_BASE}/get_all_printer`;
       try {
-        const { lat, lon } = await getLocation();
+        const { lat, lon } = await getLocation({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
         userCoords = { lat, lon };
         url = `${url}?user_lat=${lat}&user_lon=${lon}`;
-      } catch {}
+      } catch (e) {
+        console.warn("⚠️ ไม่ได้ตำแหน่งผู้ใช้:", e.message);
+      }
 
       try {
         const res = await fetch(url);
@@ -170,14 +172,13 @@
         data.printers.forEach(p => { printerMap[p.printer_id] = p; });
         renderListView(data.printers);
         renderMapView(data.printers);
-        // ✅ ถ้า userCoords เพิ่งมา ให้ renderMapView อีกทีเพื่อวาดจุดเรา
-        if (userCoords) renderMapView(data.printers);
       } catch (err) {
         listView.innerHTML = `<p class='text-red-600 text-center'>${t.loadingFailed}</p>`;
       } finally {
         loadingSpinner.classList.add('hidden');
       }
     }
+
 
     function isPrinterOpen(printer) {
       if (!printer.open_time || !printer.close_time) return true;
@@ -397,6 +398,24 @@
       window.location.href = `index.html?${params.toString()}`;
     }
 
+    function watchUserPosition() {
+      if (!navigator.geolocation) return;
+      navigator.geolocation.watchPosition(
+        pos => {
+          userCoords = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+          if (map && userMarker) {
+            userMarker.setLatLng([userCoords.lat, userCoords.lon]);
+          }
+        },
+        err => {
+          console.error("watchPosition error:", err);
+        },
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
+      );
+    }
+
+
+
     document.getElementById('list-tab').addEventListener('click', () => {
       document.getElementById('list-view').classList.remove('hidden');
       document.getElementById('map-view').classList.add('hidden');
@@ -424,6 +443,7 @@
 
     (async () => {
       await loadPrinters();
+      watchUserPosition();   // ✅ เริ่ม track GPS user ตลอดเวลา
       updateLanguage('th');
 
       const urlParams = new URLSearchParams(window.location.search);

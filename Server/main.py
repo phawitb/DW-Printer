@@ -298,68 +298,86 @@ async def pay_completed(request: Request):
     try:
         data = await request.json()
         ref_id = data.get("ref_id")
-        
+        status = data.get("status", "paid")
+        line_id = data.get("line_id")
+        printer_id = data.get("printer_id")
+        total_amount = data.get("total_amount", 0)
+        total_pages = data.get("total_pages", 0)
+        jobs = data.get("jobs", [])
+
         if not ref_id:
             raise HTTPException(status_code=400, detail="Missing ref_id")
 
-        print(f"Received webhook for ref_id: {ref_id}. Updating status to 'paid'.")
+        print(f"🔔 Received pay_completed for ref_id={ref_id}, status={status}")
 
-        # หาเอกสารที่ตรงกับ ref_id
+        # หา doc
         doc = collection_payment.find_one({"ref_id": ref_id})
+
         if not doc:
-            raise HTTPException(status_code=404, detail="Payment document with this ref_id not found")
-        
-        # sent line chat
-        line_bot_api.push_message(
-            doc["line_id"],
-            TextSendMessage(text="✅ ชำระเงินเรียบร้อยแล้ว กำลังพิมพ์...\nตรวจสอบสถานะได้ที่: {}/historys.html".format(FRONTEND_BASE_URL))
-        )
+            # 👉 กรณี Direct Print (ไม่มีเอกสารใน DB) → สร้างใหม่
+            payment_doc = {
+                "ref_id": ref_id,
+                "line_id": line_id,
+                "printer_id": printer_id,
+                "jobs": jobs,
+                "total_amount": total_amount,
+                "total_pages": total_pages,
+                "status": status,
+                "created_at": datetime.utcnow(),
+                "completed_at": datetime.utcnow(),
+                "payment_type": "direct"
+            }
+            collection_payment.insert_one(payment_doc)
+            doc = payment_doc
+            print("🆕 Created new payment doc for direct print:", payment_doc)
 
-        # ถ้าจ่ายแล้ว → ข้าม
-        if doc.get("status") == "paid":
-            return {"status": "ok", "message": "Payment already completed. No action taken."}
+        else:
+            # 👉 กรณีมี doc อยู่แล้ว → update status
+            collection_payment.update_one(
+                {"ref_id": ref_id},
+                {"$set": {"status": status, "completed_at": datetime.utcnow()}}
+            )
+            doc.update({"status": status})
 
-        # อัปเดตสถานะเป็น paid
-        collection_payment.update_one(
-            {"ref_id": ref_id},
-            {"$set": {"status": "paid", "completed_at": datetime.utcnow()}},
-        )
+        # ส่งข้อความแจ้งใน LINE
+        if line_id:
+            try:
+                line_bot_api.push_message(
+                    line_id,
+                    TextSendMessage(text="✅ การสั่งพิมพ์ถูกยืนยันแล้ว\nตรวจสอบสถานะได้ที่: {}/historys.html".format(FRONTEND_BASE_URL))
+                )
+            except Exception as e:
+                print("⚠️ LINE push error:", e)
 
+        # ส่งไฟล์ไปเครื่องพิมพ์
         pdf_dir = os.path.join(PDF_DIR, doc["line_id"])
         upload_failed = False
-
         for job in doc["jobs"]:
             pdf_file = os.path.join(pdf_dir, job["filename"])
             ok, msg = send_to_printer(pdf_file, doc["line_id"], doc["printer_id"])
-            print("Send to printer:", pdf_file, ok, msg)
+            print("🖨 Send to printer:", pdf_file, ok, msg)
 
             if not ok:
                 upload_failed = True
-                # update status เป็น uploadfail และเก็บ error
                 collection_payment.update_one(
                     {"ref_id": ref_id},
-                    {"$set": {
-                        "status": "uploadfail",
-                        "completed_at": datetime.utcnow()
-                    }}
+                    {"$set": {"status": "uploadfail", "completed_at": datetime.utcnow()}}
                 )
-                break  # ไม่ต้องส่งไฟล์ที่เหลือแล้ว
+                break
 
         if upload_failed:
-            return {"status": "error", "message": "Payment updated but upload to printer failed."}
+            return {"status": "error", "message": "Upload to printer failed"}
         else:
             collection_payment.update_one(
-                    {"ref_id": ref_id},
-                    {"$set": {
-                        "status": "uploaded",
-                        "completed_at": datetime.utcnow()
-                    }}
-                )
+                {"ref_id": ref_id},
+                {"$set": {"status": "uploaded", "completed_at": datetime.utcnow()}}
+            )
             return {"status": "ok", "message": "Payment updated and print job submitted."}
 
     except Exception as e:
-        print(f"Error in pay_completed: {e}")
+        print(f"❌ Error in pay_completed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # === Other existing endpoints (no changes) ===
 @app.post("/cancel_payment/{ref_id}")
@@ -714,3 +732,33 @@ async def upload_pdf(file: UploadFile = File(...), uid: str = Form(...)):
         return {"status": "ok", "filename": file.filename}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+
+@app.post("/update_status/{ref_id}")
+def update_status(ref_id: str, status: str = Form(...)):
+    doc = collection_payment.find_one({"ref_id": ref_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    collection_payment.update_one(
+        {"ref_id": ref_id},
+        {"$set": {"status": status, "completed_at": datetime.utcnow()}}
+    )
+
+    return {"status": "ok", "message": f"Payment {ref_id} updated to {status}"}
+
+# @app.get("/get_config")
+# def get_config():
+#     collection_config = db["config"]
+#     doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")}, {"_id": 0})
+#     if not doc:
+#         return {"frontend": {"show_offline_printer": "True", "use_payment": "True"}}
+#     return doc
+
+@app.get("/get_config")
+def get_config():
+    collection_config = db["config"]
+    doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")})
+    if not doc:
+        return {"frontend": {"use_payment": "True"}}  # ค่า default
+    return {"frontend": doc.get("frontend", {})}
