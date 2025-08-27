@@ -25,6 +25,11 @@
     .select-btn img { width:16px; height:16px; }
     @keyframes rainbow { 0%{color:red;} 14%{color:orange;} 28%{color:yellow;} 42%{color:green;} 57%{color:blue;} 71%{color:indigo;} 85%{color:violet;} 100%{color:red;} }
     .rainbow-text { animation: rainbow 4s linear infinite; }
+    .offline {
+      filter: grayscale(100%);
+      opacity: 0.7; /* ทำให้ดูหม่นลง */
+    }
+
   </style>
 </head>
 <body class="bg-gray-100 p-6 md:p-12">
@@ -72,6 +77,7 @@
     let userCoords = null;
     let map;
     let lineId = new URLSearchParams(window.location.search).get("uid");
+    let userMarker = null; // ✅ circle ของผู้ใช้
 
     // --- Icon paths ---
     const printerIconPath = "images/printer.png";
@@ -121,7 +127,6 @@
       shadowSize: [41, 41]
     });
 
-
     function updateLanguage(lang) {
       const langData = translations[lang];
       document.getElementById('page-title').textContent = langData.title;
@@ -165,6 +170,8 @@
         data.printers.forEach(p => { printerMap[p.printer_id] = p; });
         renderListView(data.printers);
         renderMapView(data.printers);
+        // ✅ ถ้า userCoords เพิ่งมา ให้ renderMapView อีกทีเพื่อวาดจุดเรา
+        if (userCoords) renderMapView(data.printers);
       } catch (err) {
         listView.innerHTML = `<p class='text-red-600 text-center'>${t.loadingFailed}</p>`;
       } finally {
@@ -209,7 +216,9 @@
       listView.innerHTML = '';
       printers.forEach(printer => {
         const card = document.createElement("div");
-        card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
+        // card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
+        card.className = `card p-4 space-y-3 ${printer.status === 'offline' ? 'offline bg-gray-50' : ''}`;
+
         
         let statusText, statusClass;
         if (printer.status === 'online') {
@@ -258,16 +267,29 @@
              </a>`
           : '';
 
+        // card.innerHTML = `
+        //     <div class="flex items-start justify-between">
+        //         <h4 class="text-lg font-semibold">${printer.location_name}</h4>
+        //         <span class="text-sm font-medium ${statusClass}">${statusText}</span>
+        //     </div>
+        //     ${typeAndPriceHtml}
+        //     <div class="flex gap-2 pt-2">
+        //         ${selectBtn}
+        //         ${navBtn}
+        //     </div>`;
+
         card.innerHTML = `
-            <div class="flex items-start justify-between">
-                <h4 class="text-lg font-semibold">${printer.location_name}</h4>
-                <span class="text-sm font-medium ${statusClass}">${statusText}</span>
-            </div>
-            ${typeAndPriceHtml}
-            <div class="flex gap-2 pt-2">
-                ${selectBtn}
-                ${navBtn}
-            </div>`;
+        <div>
+            <h4 class="text-lg font-semibold ${statusClass}">${printer.location_name}</h4>
+            <span class="text-sm font-medium ${statusClass}">${statusText}</span>
+        </div>
+        ${typeAndPriceHtml}
+        <div class="flex gap-2 pt-2">
+            ${selectBtn}
+            ${navBtn}
+        </div>`;
+
+
         listView.appendChild(card);
       });
     }
@@ -283,17 +305,21 @@
         }).addTo(map);
       }
 
-      // ล้าง marker เก่า
+      // ล้าง marker ของ printer เก่า
       map.eachLayer(layer => { 
-        if (layer instanceof L.Marker || layer instanceof L.CircleMarker) map.removeLayer(layer); 
+        if (layer instanceof L.Marker) map.removeLayer(layer); 
       });
 
-      // แสดงตำแหน่งผู้ใช้
+      // ✅ วาดตำแหน่งผู้ใช้ (ถ้า userCoords มีค่า)
       if (userCoords) {
-        L.circleMarker([userCoords.lat, userCoords.lon], {
-          color: "white", fillColor: "#2563EB", fillOpacity: 1, radius: 8, weight: 2
-        }).addTo(map).bindPopup("📍 " + (isThai ? "คุณอยู่ที่นี่" : "You are here"));
-        map.setView([userCoords.lat, userCoords.lon], 14);
+        if (!userMarker) {
+          userMarker = L.circleMarker([userCoords.lat, userCoords.lon], {
+            color: "white", fillColor: "#2563EB", fillOpacity: 1, radius: 8, weight: 2
+          }).addTo(map).bindPopup("📍 " + (isThai ? "คุณอยู่ที่นี่" : "You are here"));
+          map.setView([userCoords.lat, userCoords.lon], 14);
+        } else {
+          userMarker.setLatLng([userCoords.lat, userCoords.lon]);
+        }
       }
 
       // วาด printer
@@ -362,7 +388,6 @@
       });
     }
 
-
     function selectPrinter(printerId) {
       const printer = printerMap[printerId];
       if (!printer) return;
@@ -397,15 +422,18 @@
       loadPrinters();
     });
 
-    loadPrinters();
-    updateLanguage('th');
+    (async () => {
+      await loadPrinters();
+      updateLanguage('th');
 
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get("default") === "map") {
-      document.getElementById("map-tab").click();
-    } else {
-      document.getElementById("list-tab").click();
-    }
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("default") === "map") {
+        document.getElementById("map-tab").click();
+      } else {
+        document.getElementById("list-tab").click();
+      }
+    })();
+
   </script>
 </body>
 </html>

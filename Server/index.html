@@ -35,6 +35,14 @@
     .border-red {
       border: 2px solid #ef4444 !important; /* tailwind red-500 */
     }
+    .pdf-card label {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+
 
 
   </style>
@@ -47,14 +55,24 @@
         <div id="logo-container" class="flex items-center">
           <img src="images/logo.png" alt="Logo" class="h-12">
         </div>
-        <h2 class="text-3xl font-bold">DeepPrinter</h2>
+        <!-- <h2 class="text-3xl font-bold">DeepPrinter</h2> -->
+        <!-- <h2 class="text-2xl font-bold">DeepPrinter</h2> -->
+        <h2 class="text-3xl font text-blue-700">DeepPrinter</h2>
+
       </div>
       <div class="flex items-center gap-2">
-        <a href="#" id="history-link" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <!-- <a href="#" id="history-link" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
             <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.438-.695Z" clip-rule="evenodd" />
           </svg>
+        </a> -->
+        <a href="#" id="history-link" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <!-- 🔔 bell icon -->
+          <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" class="w-5 h-5">
+            <path d="M12 2a7 7 0 0 0-7 7v4.586l-1.707 1.707A1 1 0 0 0 4 17h16a1 1 0 0 0 .707-1.707L19 13.586V9a7 7 0 0 0-7-7zm0 20a3 3 0 0 0 3-3H9a3 3 0 0 0 3 3z"/>
+          </svg>
         </a>
+        
         <button id="lang-toggle" class="bg-white rounded-full p-2 text-gray-700 shadow-md hover:bg-gray-200 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
           <div class="flex items-center space-x-1">
             <span id="lang-text" class="text-sm font-semibold">TH</span>
@@ -122,7 +140,7 @@
   <div class="fixed-footer">
     <div class="max-w-xl mx-auto">
       <button id="print-btn" onclick="submitPrint()" class="py-2 text-base primary-btn">
-        ตกลง
+        สั่งพิมพ์
       </button>
     </div>
   </div>
@@ -171,7 +189,7 @@
         color: "สี:",
         bw: "ขาวดำ",
         copies: "สำเนา:",
-        printBtn: "ตกลง",
+        printBtn: "สั่งพิมพ์",
         editBtn: "ยกเลิก",
         totalAmount: "ยอดชำระทั้งหมด:",
         totalPages: "จำนวนหน้าทั้งหมด:",
@@ -214,7 +232,7 @@
         color: "Color:",
         bw: "B&W",
         copies: "Copies:",
-        printBtn: "OK",
+        printBtn: "Print",
         editBtn: "Cancel",
         totalAmount: "Total Amount:",
         totalPages: "Total Pages:",
@@ -461,8 +479,13 @@
             checkbox.className = "w-5 h-5 text-blue-600 shrink-0 rounded focus:ring-blue-500";
             checkbox.id = fileId; checkbox.name = "print-select"; checkbox.value = filename; checkbox.checked = true; checkbox.dataset.index = index + 1;
 
+            // const label = document.createElement("label");
+            // label.htmlFor = fileId; label.className = "text-base font-medium text-gray-800"; label.textContent = filename;
             const label = document.createElement("label");
-            label.htmlFor = fileId; label.className = "text-base font-medium text-gray-800"; label.textContent = filename;
+            label.htmlFor = fileId; 
+            label.className = "text-base font-medium text-gray-800"; 
+            label.textContent = filename;
+
 
             header.appendChild(checkbox); header.appendChild(label); card.appendChild(header);
 
@@ -476,7 +499,7 @@
               <div class="space-y-2">
                 <div class="flex items-center space-x-2">
                   <input type="radio" name="page-option-${index}" value="all" checked class="form-radio text-blue-600">
-                  <span class="text-sm total-pages-display">(${totalPages} ${isThai ? 'หน้า' : 'pages'})</span>
+                  <span class="text-sm total-pages-display">${isThai ? 'ทั้งหมด' : 'All'} (${totalPages} ${isThai ? 'หน้า' : 'pages'})</span>
                 </div>
                 <div class="flex items-center space-x-2">
                   <input type="radio" name="page-option-${index}" value="custom" class="form-radio text-blue-600">
