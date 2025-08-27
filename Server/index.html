@@ -661,12 +661,14 @@
       jobSummaryList.innerHTML = jobSummaryHtml;
 
       const printBtn = document.getElementById("print-btn");
-      if (USE_PAYMENT) {
+      if (currentTotalAmount > 0) {
+        // มีค่าเงิน → ต้องจ่าย → QR flow
         printBtn.textContent = langData.editBtn;
         printBtn.classList.remove("bg-blue-600","hover:bg-blue-700","bg-green-600","hover:bg-green-700");
         printBtn.classList.add("bg-red-600","hover:bg-red-700");
         printBtn.setAttribute("onclick", "cancelPrint()");
       } else {
+        // ฟรี → direct print
         printBtn.textContent = langData.confirmPrintBtn;
         printBtn.classList.remove("bg-blue-600","hover:bg-blue-700","bg-red-600","hover:bg-red-700");
         printBtn.classList.add("bg-green-600","hover:bg-green-700");
@@ -718,18 +720,15 @@
       currentTotalPages = totalPages;
       currentPrinterLocation = printer.location_name;
 
-      // ✅ ถ้าไม่ใช้ระบบจ่ายเงิน
-      // ✅ ถ้าไม่ใช้ระบบจ่ายเงิน
-      if (!USE_PAYMENT) {
+      // ✅ ถ้ายอดรวม = 0 → bypass QR
+      if (currentTotalAmount === 0) {
         const paymentViewEl = document.getElementById("payment-view");
         const configViewEl = document.getElementById("config-view");
         configViewEl.classList.add("hidden");
         paymentViewEl.classList.remove("hidden");
 
-        // ❌ ไม่ต้องเติม innerHTML ให้ payment-status-card (ไม่โชว์ช่องว่าง)
         document.getElementById("payment-status-card").classList.add("hidden");
 
-        // เติม summary ด้านล่างตามปกติ
         document.getElementById("printer-name-summary").textContent =
           `${langData.printer} ${currentPrinterLocation}`;
         document.getElementById("total-price-summary").textContent =
@@ -755,19 +754,16 @@
         });
         document.getElementById("job-summary-list").innerHTML = jobSummaryHtml;
 
-        // ✅ ใช้ปุ่ม footer เดิม → เปลี่ยน text และ action
         const printBtn = document.getElementById("print-btn");
         printBtn.textContent = langData.confirmPrintBtn;
         printBtn.setAttribute("onclick", "confirmDirectPrint()");
         printBtn.classList.remove("bg-blue-600","hover:bg-blue-700","bg-red-600","hover:bg-red-700");
         printBtn.classList.add("bg-green-600","hover:bg-green-700");
 
+        return; // 🚀 ออกก่อน ไม่ไป gen QR
       }
 
-
-
-      // ✅ ถ้าใช้ระบบจ่ายเงิน (เดิม)
-      // ✅ ถ้าใช้ระบบจ่ายเงิน (QR)
+      // ✅ ถ้ายอดรวม > 0 → ไป flow QR ตามปกติ
       try {
         const query = new URLSearchParams({
           amount: currentTotalAmount.toFixed(2),
@@ -792,19 +788,16 @@
         if (paymentCheckInterval) clearInterval(paymentCheckInterval);
         paymentCheckInterval = setInterval(checkPaymentStatus, 1000);
 
-        // 👇 force switch หน้า
         document.getElementById("config-view").classList.add("hidden");
         document.getElementById("payment-view").classList.remove("hidden");
 
-        // render QR
         createPaymentView({}, qrUrl, currentRefId);
       } catch (err) {
         console.error("QR error:", err);
         alert("❌ QR Error: " + err.message);
       }
-
-
     }
+
 
     async function confirmDirectPrint() {
       try {
@@ -976,14 +969,14 @@
 
       const printBtn = document.getElementById("print-btn");
       if (printBtn) {
-        if (!USE_PAYMENT) {
+        if (currentTotalAmount === 0) {
           // direct print → confirm only
           printBtn.textContent = langData.confirmPrintBtn;
           printBtn.classList.remove("bg-red-600","hover:bg-red-700","bg-blue-600","hover:bg-blue-700");
           printBtn.classList.add("bg-green-600","hover:bg-green-700");
           printBtn.setAttribute("onclick", "confirmDirectPrint()");
         } else {
-          // QR payment
+          // QR payment flow
           if (printBtn.getAttribute("onclick") === "confirmDirectPrint()") {
             printBtn.textContent = langData.confirmPrintBtn;
           } else if (printBtn.getAttribute("onclick") === "cancelPrint()") {
@@ -991,6 +984,7 @@
           }
         }
       }
+
 
 
     }
@@ -1035,19 +1029,19 @@
       }
     }
 
-    let USE_PAYMENT = true;  // ค่า default
+    // let USE_PAYMENT = true;  // ค่า default
 
-    async function loadUsePayment() {
-      try {
-        const res = await fetch(`${API_BASE}/get_config`);
-        const data = await res.json();
-        USE_PAYMENT = (data.frontend.use_payment === "True");
-        console.log("✅ use_payment =", USE_PAYMENT);
-      } catch (err) {
-        console.error("โหลด config ไม่ได้:", err);
-        USE_PAYMENT = true;
-      }
-    }
+    // async function loadUsePayment() {
+    //   try {
+    //     const res = await fetch(`${API_BASE}/get_config`);
+    //     const data = await res.json();
+    //     USE_PAYMENT = (data.frontend.use_payment === "True");
+    //     console.log("✅ use_payment =", USE_PAYMENT);
+    //   } catch (err) {
+    //     console.error("โหลด config ไม่ได้:", err);
+    //     USE_PAYMENT = true;
+    //   }
+    // }
 
 
 
@@ -1069,7 +1063,7 @@
 
       try {
         await loadConfig();
-        await loadUsePayment();   // ✅ โหลด config.use_payment จาก backend ก่อน
+        // await loadUsePayment();   // ✅ โหลด config.use_payment จาก backend ก่อน
 
         // 1) อ่าน LINE UID ผ่าน LIFF
         lineId = await getLineUserIdViaLIFF();
