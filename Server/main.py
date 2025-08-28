@@ -952,3 +952,27 @@ def debug_authen():
             fixed_authen[k] = []
 
     return {"node_authen": fixed_authen}
+
+
+@app.post("/update_printer_status/{printer_id}")
+def update_printer_status(
+    printer_id: str,
+    status: str = Form("online")
+):
+    """อัปเดต last_seen และสถานะของ printer"""
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    result = collection_printer.update_one(
+        {"printer_id": printer_id},
+        {"$set": {"last_seen": now, "status": status}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+
+    return {
+        "status": "ok",
+        "printer_id": printer_id,
+        "last_seen": now,
+        "set_status": status
+    }
