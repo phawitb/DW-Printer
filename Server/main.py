@@ -17,7 +17,7 @@ import json
 from pytz import timezone
 from pathlib import Path
 from datetime import datetime, timedelta
-from fastapi import UploadFile, File, Form
+from fastapi import UploadFile, File, Form, Header
 
 
 def load_config():
@@ -37,6 +37,7 @@ client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
 collection_printer = db["printers"]
 collection_payment = db["payment_historys"]
+collection_config = db["config"]
 
 PDF_DIR = "pdfs"
 MAX_DISK_USAGE_MB = cfg["MAX_DISK_USAGE_MB"]
@@ -763,6 +764,21 @@ def get_config():
         return {"frontend": {"use_payment": "True"}}  # ค่า default
     return {"frontend": doc.get("frontend", {})}
 
+@app.get("/get_config_authen")
+def get_config():
+    collection_config = db["config"]
+    doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")}, {"_id": 0})
+    if not doc:
+        return {
+            "frontend": {"use_payment": "True"},
+            "node_authen": {}
+        }
+    return {
+        "frontend": doc.get("frontend", {}),
+        "node_authen": doc.get("node_authen", {})
+    }
+
+
 
 @app.post("/update_printer_url")
 def update_printer_url(
@@ -783,3 +799,156 @@ def update_printer_url(
     except Exception as e:
         print(f"❌ Error in update_printer_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Serve manage.html ===
+# === Serve manage.html ===
+@app.get("/manage.html")
+def serve_manage():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "manage.html"))
+
+# === Permission Helper ===
+def check_permission(line_id: str, printer_id: str) -> bool:
+    """ตรวจสอบสิทธิ์การเข้าถึง printer ตาม rule ใหม่:
+       - admin → เข้าได้ทุกเครื่อง
+       - printer_id ไม่มีใน node_authen → เข้าได้
+       - printer_id มี แต่ [] → เข้าได้
+       - printer_id มี และ list ไม่ว่าง → ต้องมี line_id อยู่ใน list
+    """
+    doc = collection_config.find_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")}
+    )
+    if not doc:
+        return False
+
+    node_authen = doc.get("node_authen", {})
+
+    # ✅ admin → list
+    admin_ids = node_authen.get("admin", [])
+    if isinstance(admin_ids, str):
+        admin_ids = [admin_ids]
+    if line_id in admin_ids:
+        return True
+
+    # ✅ ถ้า printer_id ไม่มี key → เข้าได้ทุกคน
+    if printer_id not in node_authen:
+        print(f"ℹ️ Printer {printer_id} not found in node_authen → allow all")
+        return True
+
+    assigned_ids = node_authen.get(printer_id, [])
+    if isinstance(assigned_ids, str):
+        assigned_ids = [assigned_ids]
+
+    # ✅ ถ้าเป็น [] → เข้าได้ไม่จำกัด
+    if not assigned_ids:
+        print(f"ℹ️ Printer {printer_id} has empty list → allow all")
+        return True
+
+    # ✅ ถ้า line_id อยู่ใน list → ผ่าน
+    if line_id in assigned_ids:
+        return True
+
+    # ❌ อื่น ๆ → Forbidden
+    print(f"🚫 Permission denied for {line_id} on {printer_id}")
+    return False
+
+
+
+
+
+# === API: Get Printer ===
+@app.get("/get_printer/{printer_id}")
+def get_printer(printer_id: str, x_line_uid: str = Header(...)):
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    doc = collection_printer.find_one({"printer_id": printer_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    return doc
+
+
+# === API: Update Printer ===
+@app.post("/update_printer/{printer_id}")
+async def update_printer(
+    printer_id: str, 
+    request: Request, 
+    x_line_uid: str = Header(...)
+):
+    # ✅ ตรวจสิทธิ์
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # ✅ อ่าน payload
+    data = await request.json()
+
+    # ✅ update printer data
+    result = collection_printer.update_one(
+        {"printer_id": printer_id},
+        {"$set": data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    # ✅ update node_authen mapping เป็น list
+    collection_config.update_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")},
+        {"$addToSet": {f"node_authen.{printer_id}": x_line_uid}}
+    )
+
+    return {
+        "status": "ok",
+        "message": f"Updated printer {printer_id} and node_authen",
+        "uid": x_line_uid
+    }
+
+
+# === API: Get Config Authen ===
+@app.get("/get_config_authen")
+def get_config_authen():
+    """ดึงค่า config ทั้ง frontend และ node_authen (เป็น list เสมอ)"""
+    collection_config = db["config"]
+    doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")}, {"_id": 0})
+    if not doc:
+        return {
+            "frontend": {"use_payment": "True"},
+            "node_authen": {}
+        }
+
+    node_authen = doc.get("node_authen", {})
+    # ✅ ensure ทุกค่าเป็น list
+    fixed_authen = {}
+    for k, v in node_authen.items():
+        if isinstance(v, str):
+            fixed_authen[k] = [v]
+        elif isinstance(v, list):
+            fixed_authen[k] = v
+        else:
+            fixed_authen[k] = []
+
+    return {
+        "frontend": doc.get("frontend", {}),
+        "node_authen": fixed_authen
+    }
+
+
+# === API: Debug Authen ===
+@app.get("/debug_authen")
+def debug_authen():
+    """ตรวจสอบ node_authen ล่าสุดจาก MongoDB (คืนค่าเป็น list เสมอ)"""
+    doc = collection_config.find_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")},
+        {"node_authen": 1, "_id": 0}
+    )
+
+    node_authen = doc.get("node_authen", {}) if doc else {}
+    fixed_authen = {}
+    for k, v in node_authen.items():
+        if isinstance(v, str):
+            fixed_authen[k] = [v]
+        elif isinstance(v, list):
+            fixed_authen[k] = v
+        else:
+            fixed_authen[k] = []
+
+    return {"node_authen": fixed_authen}
