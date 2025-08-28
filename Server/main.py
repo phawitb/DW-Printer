@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Query, HTTPException
+from fastapi import FastAPI, Request, Query, HTTPException, Form
 from fastapi.responses import JSONResponse, Response, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -954,25 +954,32 @@ def debug_authen():
     return {"node_authen": fixed_authen}
 
 
+
+
 @app.post("/update_printer_status/{printer_id}")
 def update_printer_status(
     printer_id: str,
-    status: str = Form("online")
+    status: str = Form("online"),
+    last_seen: str = Form(None)   # 👈 client อาจส่งเวลามา หรือไม่ส่งก็ได้
 ):
-    """อัปเดต last_seen และสถานะของ printer"""
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        if last_seen is None:
+            # ถ้า client ไม่ส่ง → ใช้เวลาประเทศไทยปัจจุบัน
+            last_seen = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
 
-    result = collection_printer.update_one(
-        {"printer_id": printer_id},
-        {"$set": {"last_seen": now, "status": status}}
-    )
+        result = collection_printer.update_one(
+            {"printer_id": printer_id},
+            {"$set": {"last_seen": last_seen, "status": status}}
+        )
 
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
 
-    return {
-        "status": "ok",
-        "printer_id": printer_id,
-        "last_seen": now,
-        "set_status": status
-    }
+        return {
+            "status": "ok",
+            "printer_id": printer_id,
+            "last_seen": last_seen,
+            "set_status": status
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
