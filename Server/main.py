@@ -187,7 +187,7 @@ def get_latest_url(printer_id: str):
         return doc.get("url"), doc.get("timestamp")
     return None, None
 
-def send_to_printer(PDF_FILE: str, ref_id: str, printer_id: str):
+def send_to_printer(PDF_FILE: str, UID: str, printer_id: str):
     printer_url, ts = get_latest_url(printer_id)
     print(f"Latest URL for {printer_id} @ {ts} => {printer_url}")
     if not printer_url:
@@ -196,7 +196,7 @@ def send_to_printer(PDF_FILE: str, ref_id: str, printer_id: str):
     try:
         with open(PDF_FILE, "rb") as f:
             files = {"file": (os.path.basename(PDF_FILE), f, "application/pdf")}
-            data = {"ref_id": ref_id}
+            data = {"uid": UID}
             r = requests.post(API_URL, files=files, data=data, timeout=30)
         return r.status_code == 200, r.text
     except Exception as e:
@@ -355,7 +355,7 @@ async def pay_completed(request: Request):
         upload_failed = False
         for job in doc["jobs"]:
             pdf_file = os.path.join(pdf_dir, job["filename"])
-            ok, msg = send_to_printer(pdf_file, doc["ref_id"], doc["printer_id"])
+            ok, msg = send_to_printer(pdf_file, doc["line_id"], doc["printer_id"])
             print("🖨 Send to printer:", pdf_file, ok, msg)
 
             if not ok:
