@@ -18,7 +18,7 @@ from pytz import timezone
 from pathlib import Path
 from datetime import datetime, timedelta
 from fastapi import UploadFile, File, Form, Header
-
+from zoneinfo import ZoneInfo
 
 def load_config():
     path = Path(__file__).resolve().parent / "static" / "config.json"
@@ -1003,3 +1003,156 @@ def update_printer_status(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# === API: Get printer name/list from MongoDB ===
+@app.get("/get_printer_name/{printer_id}")
+def get_printer_name(printer_id: str):
+    """
+    ดึงชื่อเครื่องพิมพ์ที่เลือก (selected_printer) และรายการเครื่องพิมพ์ทั้งหมด (list_printers)
+    จากคอลเลกชัน dimonwall.printers ตาม printer_id ที่ส่งมา
+    รูปแบบผลลัพธ์:
+    {
+        "printer_id": "...",
+        "selected_printer": "PDF",
+        "list_printers": ["PDF", "EPSON1"]
+    }
+    """
+    doc = collection_printer.find_one(
+        {"printer_id": printer_id},
+        {"_id": 0, "selected_printer": 1, "list_printers": 1}
+    )
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    selected = doc.get("selected_printer")
+    plist = doc.get("list_printers", [])
+
+    # เผื่อกรณีใน DB เก็บเป็น string ให้แปลงเป็น list
+    if isinstance(plist, str):
+        # รองรับทั้งรูปแบบ "PDF,EPSON1" หรือ "['PDF','EPSON1']"
+        try:
+            # ลอง parse เป็น JSON ก่อน
+            parsed = json.loads(plist)
+            if isinstance(parsed, list):
+                plist = parsed
+            else:
+                raise ValueError
+        except Exception:
+            # fallback แยกด้วย comma
+            plist = [p.strip() for p in plist.split(",") if p.strip()]
+
+    return {
+        "printer_id": printer_id,
+        "selected_printer": selected,
+        "list_printers": plist
+    }
+    
+# === API: Update printer selected_printer / list_printers ===
+@app.post("/update_printer_name/{printer_id}")
+async def update_printer_name(
+    printer_id: str,
+    request: Request,
+    x_line_uid: str = Header(...)
+):
+    """
+    อัปเดตฟิลด์ selected_printer และ/หรือ list_printers ของเครื่องพิมพ์ที่ระบุ
+    - ส่งอย่างใดอย่างหนึ่งหรือทั้งคู่ก็ได้
+    - ถ้าไม่ได้ส่งฟิลด์นั้นมา -> ไม่อัปเดตฟิลด์นั้น
+    Payload ตัวอย่าง:
+      {
+        "selected_printer": "PDF",
+        "list_printers": ["PDF", "EPSON1"]
+      }
+    หรือ
+      {
+        "list_printers": "PDF,EPSON1"
+      }
+    """
+
+    # ✅ ตรวจสิทธิ์
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # ✅ หาเอกสารเดิม
+    current = collection_printer.find_one({"printer_id": printer_id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    # ✅ อ่าน payload
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    update_fields = {}
+
+    # --- selected_printer: อัปเดตเฉพาะกรณีส่งมาใน payload ---
+    if "selected_printer" in data:
+        sel = data.get("selected_printer")
+        # ยอมรับค่าเป็น str หรือ None (ถ้าต้องการล้างค่าให้ส่ง "" หรือ None)
+        if sel is not None:
+            if isinstance(sel, str):
+                sel = sel.strip()
+            update_fields["selected_printer"] = sel
+
+    # --- list_printers: อัปเดตเฉพาะกรณีส่งมาใน payload ---
+    if "list_printers" in data:
+        lp = data.get("list_printers")
+
+        # แปลงให้เป็น list[str]
+        def to_list(v):
+            if v is None:
+                return None
+            if isinstance(v, list):
+                # กรองให้เป็นสตริงและ trim
+                return [str(x).strip() for x in v if str(x).strip() != ""]
+            if isinstance(v, str):
+                s = v.strip()
+                if s == "":
+                    return []
+                # ลอง parse JSON-string ก่อน
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip() != ""]
+                except Exception:
+                    pass
+                # fallback: คั่นด้วย comma
+                return [p.strip() for p in s.split(",") if p.strip() != ""]
+            # อื่นๆ แปลงเป็นสตริงเดี่ยวในลิสต์
+            return [str(v).strip()]
+
+        parsed_list = to_list(lp)
+        if parsed_list is not None:
+            update_fields["list_printers"] = parsed_list
+
+    if not update_fields:
+        # ไม่มีฟิลด์ใดส่งมา -> ไม่อัปเดต
+        return {
+            "status": "noop",
+            "message": "Nothing to update",
+            "printer_id": printer_id,
+            "selected_printer": current.get("selected_printer"),
+            "list_printers": current.get("list_printers", []),
+        }
+
+    # ✅ ทำการอัปเดต
+    result = collection_printer.update_one(
+        {"printer_id": printer_id},
+        {"$set": update_fields}
+    )
+
+    # อ่านค่าล่าสุดคืนให้ผู้เรียก
+    updated = collection_printer.find_one(
+        {"printer_id": printer_id},
+        {"_id": 0, "selected_printer": 1, "list_printers": 1}
+    )
+
+    return {
+        "status": "ok" if result.matched_count else "not_found",
+        "printer_id": printer_id,
+        "selected_printer": updated.get("selected_printer"),
+        "list_printers": updated.get("list_printers", []),
+        "updated_fields": list(update_fields.keys()),
+    }
