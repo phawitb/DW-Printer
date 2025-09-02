@@ -1048,12 +1048,11 @@ def get_printer_name(printer_id: str):
         "list_printers": plist
     }
     
-# === API: Update printer selected_printer / list_printers ===
+# === API: Update printer selected_printer / list_printers (no auth) ===
 @app.post("/update_printer_name/{printer_id}")
 async def update_printer_name(
     printer_id: str,
-    request: Request,
-    x_line_uid: str = Header(...)
+    request: Request
 ):
     """
     อัปเดตฟิลด์ selected_printer และ/หรือ list_printers ของเครื่องพิมพ์ที่ระบุ
@@ -1069,11 +1068,6 @@ async def update_printer_name(
         "list_printers": "PDF,EPSON1"
       }
     """
-
-    # ✅ ตรวจสิทธิ์
-    if not check_permission(x_line_uid, printer_id):
-        raise HTTPException(status_code=403, detail="Permission denied")
-
     # ✅ หาเอกสารเดิม
     current = collection_printer.find_one({"printer_id": printer_id})
     if not current:
@@ -1090,7 +1084,6 @@ async def update_printer_name(
     # --- selected_printer: อัปเดตเฉพาะกรณีส่งมาใน payload ---
     if "selected_printer" in data:
         sel = data.get("selected_printer")
-        # ยอมรับค่าเป็น str หรือ None (ถ้าต้องการล้างค่าให้ส่ง "" หรือ None)
         if sel is not None:
             if isinstance(sel, str):
                 sel = sel.strip()
@@ -1100,12 +1093,10 @@ async def update_printer_name(
     if "list_printers" in data:
         lp = data.get("list_printers")
 
-        # แปลงให้เป็น list[str]
         def to_list(v):
             if v is None:
                 return None
             if isinstance(v, list):
-                # กรองให้เป็นสตริงและ trim
                 return [str(x).strip() for x in v if str(x).strip() != ""]
             if isinstance(v, str):
                 s = v.strip()
@@ -1120,7 +1111,6 @@ async def update_printer_name(
                     pass
                 # fallback: คั่นด้วย comma
                 return [p.strip() for p in s.split(",") if p.strip() != ""]
-            # อื่นๆ แปลงเป็นสตริงเดี่ยวในลิสต์
             return [str(v).strip()]
 
         parsed_list = to_list(lp)
@@ -1128,7 +1118,6 @@ async def update_printer_name(
             update_fields["list_printers"] = parsed_list
 
     if not update_fields:
-        # ไม่มีฟิลด์ใดส่งมา -> ไม่อัปเดต
         return {
             "status": "noop",
             "message": "Nothing to update",
