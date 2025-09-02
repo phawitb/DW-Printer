@@ -192,15 +192,35 @@ def send_to_printer(PDF_FILE: str, doc: dict):
     print(f"Latest URL for {doc['printer_id']} @ {ts} => {printer_url}")
     if not printer_url:
         return False, "No printer URL"
-    API_URL = f"{printer_url}/upload-pdf"
+
+    api_url = f"{printer_url.rstrip('/')}/upload-pdf"
+
     try:
         with open(PDF_FILE, "rb") as f:
-            files = {"file": (os.path.basename(PDF_FILE), f, "application/pdf")}
-            data = doc
-            r = requests.post(API_URL, files=files, data=data, timeout=30)
-        return r.status_code == 200, r.text
-    except Exception as e:
-        return False, str(e)
+            files = {
+                "file": (os.path.basename(PDF_FILE), f, "application/pdf")
+            }
+            # IMPORTANT: backend expects `doc` as a *string* form field
+            data = {
+                "doc": json.dumps(doc, ensure_ascii=False, default=str)
+            }
+
+            r = requests.post(
+                api_url,
+                files=files,
+                data=data,              # form fields
+                timeout=(10, 40)        # (connect, read) seconds
+            )
+
+        ok = r.ok
+        # Return more informative text if not 2xx
+        text = r.text if ok else f"HTTP {r.status_code}: {r.text}"
+        return ok, text
+
+    except requests.exceptions.RequestException as e:
+        return False, f"Request error: {e}"
+    except OSError as e:
+        return False, f"File error: {e}"
 
 # --- Distance helpers for get_all_printer sorting ---
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
