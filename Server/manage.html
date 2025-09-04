@@ -24,11 +24,12 @@
     <div class="card p-6 space-y-4">
       <label class="block text-lg font-semibold">Printer ID</label>
       <div class="flex flex-col sm:flex-row gap-3">
-        <input id="printerId" type="text" class="border px-4 py-3 rounded-lg w-full focus:ring-2 focus:ring-blue-500 outline-none" placeholder="เช่น P0001">
+        <input id="printerId" type="text" class="border px-4 py-3 rounded-lg w-full focus:ring-2 focus:ring-blue-500 outline-none" placeholder="เช่น rpi-cd1ee4">
         <button onclick="loadPrinter()" class="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition w-full sm:w-auto">
           โหลดข้อมูล
         </button>
       </div>
+      <p id="loadResult" class="text-sm"></p>
     </div>
 
     <!-- Card: Printer Form -->
@@ -52,6 +53,13 @@
       <div>
         <label class="block text-lg font-semibold">URL</label>
         <input id="url" class="border px-4 py-3 w-full rounded-lg bg-gray-200 text-gray-500" disabled>
+      </div>
+
+      <!-- Select default/selected printer from list_printers -->
+      <div id="selectedPrinterWrap" class="hidden">
+        <label class="block text-lg font-semibold">เลือกเครื่องพิมพ์ (ในเครื่อง)</label>
+        <select id="selected_printer" class="border px-4 py-3 w-full rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"></select>
+        <p id="printers_help" class="text-sm text-gray-500 mt-1"></p>
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -86,10 +94,30 @@
         </div>
       </div>
 
-      <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-green-700 transition w-full sm:w-auto">
-        บันทึก
-      </button>
+      <div class="flex flex-col sm:flex-row gap-3">
+        <button type="submit" class="bg-green-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-green-700 transition w-full sm:w-auto">
+          บันทึก
+        </button>
+        <button type="button" id="btnTestPrint" onclick="testPrint()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-indigo-700 transition w-full sm:w-auto">
+          พิมพ์ทดสอบ
+        </button>
+      </div>
+      <p id="saveResult" class="text-sm"></p>
+      <p id="testPrintResult" class="text-sm text-gray-600"></p>
     </form>
+  </div>
+
+  <!-- Loading/Result Overlay -->
+  <div id="loadingOverlay" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-2xl shadow-xl px-6 py-6 flex flex-col items-center gap-3 w-[min(92vw,420px)] text-center">
+      <div id="overlayIcon"></div>
+      <div id="overlayTitle" class="text-lg font-semibold"></div>
+      <div id="overlaySubtitle" class="text-sm text-gray-500"></div>
+      <div id="overlayActions" class="mt-2 hidden flex gap-2">
+        <button type="button" onclick="showLoadingOverlay(false)" class="px-4 py-2 rounded-lg bg-gray-800 text-white">ปิด</button>
+        <a href="/historys.html" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">ดูประวัติ</a>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -114,53 +142,263 @@
       console.log("👤 Current UID:", lineUid);
     }
 
-    async function loadPrinter() {
-      const id = document.getElementById("printerId").value.trim();
-      if (!id) return alert("กรอก printer_id ก่อน");
+    function setInlineMsg(elId, ok, msg){
+      const el = document.getElementById(elId);
+      if (!el) return;
+      el.textContent = msg;
+      el.className = 'text-sm ' + (ok ? 'text-green-600' : 'text-red-600');
+    }
 
-      const res = await fetch(API_BASE + `/get_printer/${id}`, {
-        headers: { "X-Line-Uid": lineUid }
-      });
-      if (!res.ok) {
-        console.error("❌ Error get_printer:", await res.text());
-        return alert("ไม่มีสิทธิ์หรือไม่พบเครื่องพิมพ์");
-      }
-
-      const data = await res.json();
-      document.getElementById("printerForm").classList.remove("hidden");
-
-      for (const key in data) {
-        if (document.getElementById(key)) {
-          document.getElementById(key).value = data[key];
+    function fillSimpleFields(data) {
+      const keys = ["location_name","lat","lon","url","bw_price","color_price","bw_only","open_time","close_time"];
+      for (const key of keys) {
+        const el = document.getElementById(key);
+        if (!el) continue;
+        if (key === "bw_only") {
+          el.value = String(!!data[key]);
+        } else if (key === "bw_price" || key === "color_price") {
+          el.value = (data[key] ?? "");
+        } else {
+          if (data[key] !== undefined && data[key] !== null) el.value = data[key];
+          else el.value = "";
         }
       }
-
       if (!data.open_time) document.getElementById("open_time").value = "00:00";
       if (!data.close_time) document.getElementById("close_time").value = "23:59";
     }
 
-    async function savePrinter(event) {
-        event.preventDefault();
-        const id = document.getElementById("printerId").value.trim();
-        const payload = {};
-        ["location_name","lat","lon","url","bw_price","color_price","bw_only","open_time","close_time"].forEach(k=>{
-            payload[k] = document.getElementById(k).value;
-        });
-        payload["bw_price"] = parseFloat(payload["bw_price"]);
-        payload["color_price"] = parseFloat(payload["color_price"]);
-        payload["bw_only"] = payload["bw_only"] === "true";
+    function fillPrinterSelect(data) {
+      const wrap = document.getElementById('selectedPrinterWrap');
+      const sel  = document.getElementById('selected_printer');
+      const help = document.getElementById('printers_help');
+      sel.innerHTML = '';
 
-        const res = await fetch(API_BASE + `/update_printer/${id}`, {
-            method: "POST",
-            headers: {
+      const list = Array.isArray(data.list_printers) ? data.list_printers : [];
+      if (list.length === 0) {
+        wrap.classList.add('hidden');
+        return;
+      }
+
+      for (const name of list) {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      }
+
+      if (data.selected_printer && list.includes(data.selected_printer)) {
+        sel.value = data.selected_printer;
+      } else {
+        sel.value = list[0];
+      }
+
+      help.textContent = `พบเครื่องพิมพ์ทั้งหมด ${list.length} รายการ`;
+      wrap.classList.remove('hidden');
+    }
+
+    function apiUrl(path){
+      return (API_BASE && /^https?:\/\//.test(API_BASE)) ? `${API_BASE}${path}` : path;
+    }
+
+    async function loadPrinter() {
+      const id = document.getElementById("printerId").value.trim();
+      if (!id){
+        setInlineMsg('loadResult', false, "กรอก printer_id ก่อน");
+        return;
+      }
+      setInlineMsg('loadResult', true, "กำลังโหลด...");
+
+      try{
+        const res = await fetch(apiUrl(`/get_printer/${encodeURIComponent(id)}`), {
+          headers: { "X-Line-Uid": lineUid }
+        });
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch { data = null; }
+        if (!res.ok){
+          console.error("❌ Error get_printer:", text);
+          setInlineMsg('loadResult', false, (data?.detail || data?.message || "ไม่มีสิทธิ์หรือไม่พบเครื่องพิมพ์"));
+          return;
+        }
+
+        setInlineMsg('loadResult', true, "โหลดสำเร็จ");
+        document.getElementById("printerForm").classList.remove("hidden");
+        fillSimpleFields(data);
+        fillPrinterSelect(data);
+      } catch(err){
+        console.error("get_printer error:", err);
+        setInlineMsg('loadResult', false, String(err));
+      }
+    }
+
+    async function savePrinter(event) {
+      event.preventDefault();
+      const id = document.getElementById("printerId").value.trim();
+
+      const getVal = (id) => (document.getElementById(id)?.value ?? '').trim();
+      const payload = {};
+
+      const loc = getVal('location_name'); if (loc !== '') payload.location_name = loc;
+      const lat  = getVal('lat');           if (lat !== '') payload.lat = lat;
+      const lon  = getVal('lon');           if (lon !== '') payload.lon = lon;
+
+      const open = getVal('open_time');     payload.open_time = open !== '' ? open : '00:00';
+      const close= getVal('close_time');    payload.close_time = close !== '' ? close : '23:59';
+
+      const urlVal = getVal('url');         if (urlVal !== '') payload.url = urlVal;
+
+      const numOrSkip = (v) => {
+        if (v === '') return undefined;
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const bwp = numOrSkip(getVal('bw_price'));    if (bwp !== undefined) payload.bw_price = bwp;
+      const col = numOrSkip(getVal('color_price')); if (col !== undefined) payload.color_price = col;
+
+      const bwo = getVal('bw_only'); if (bwo !== '') payload.bw_only = (bwo === 'true');
+
+      const selectedEl = document.getElementById('selected_printer');
+      if (selectedEl && !selectedEl.closest('#selectedPrinterWrap').classList.contains('hidden')) {
+        payload.selected_printer = selectedEl.value;
+      }
+
+      setInlineMsg('saveResult', true, "กำลังบันทึก...");
+
+      try{
+        const res = await fetch(apiUrl(`/update_printer/${encodeURIComponent(id)}`), {
+          method: "POST",
+          headers: {
             "Content-Type": "application/json",
             "X-Line-Uid": lineUid
-            },
-            body: JSON.stringify(payload)
+          },
+          body: JSON.stringify(payload)
         });
-        const data = await res.json();
-        console.log("📌 update_printer response:", data);
-        alert(data.message || JSON.stringify(data));
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch { data = {}; }
+
+        if (res.ok){
+          console.log("📌 update_printer response:", data);
+          setInlineMsg('saveResult', true, data.message || 'บันทึกสำเร็จ');
+          // ดึงค่าล่าสุดเพื่อรีเฟรชค่าในฟอร์มจาก DB
+          await loadPrinter();
+        } else {
+          console.error('update_printer failed:', text);
+          setInlineMsg('saveResult', false, data?.detail || data?.message || text);
+        }
+      } catch(err){
+        console.error('update_printer error:', err);
+        setInlineMsg('saveResult', false, String(err));
+      }
+    }
+
+    function setTestBtnLoading(isLoading){
+      const btn = document.getElementById('btnTestPrint');
+      if (!btn) return;
+      btn.disabled = isLoading;
+      btn.textContent = isLoading ? 'กำลังพิมพ์ทดสอบ...' : 'พิมพ์ทดสอบ';
+    }
+
+    function showLoadingOverlay(flag){
+      const el = document.getElementById('loadingOverlay');
+      if (!el) return;
+      if (flag){
+        el.classList.remove('hidden');
+        document.body.classList.add('overflow-hidden');
+      } else {
+        el.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+      }
+    }
+
+    function setOverlayState(state, title, subtitle){
+      const icon = document.getElementById('overlayIcon');
+      const t = document.getElementById('overlayTitle');
+      const s = document.getElementById('overlaySubtitle');
+      const actions = document.getElementById('overlayActions');
+      if (!icon || !t || !s || !actions) return;
+
+      const spinner = `
+        <svg class="animate-spin h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+        </svg>`;
+      const check = `
+        <svg class="h-8 w-8 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+        </svg>`;
+      const xmark = `
+        <svg class="h-8 w-8 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>`;
+
+      if (state === 'loading'){
+        icon.innerHTML = spinner;
+        t.textContent = title || 'กำลังพิมพ์...';
+        s.textContent = subtitle || 'กำลังส่งไฟล์ทดสอบไปยังเครื่องพิมพ์';
+        actions.classList.add('hidden');
+      } else if (state === 'success'){
+        icon.innerHTML = check;
+        t.textContent = title || 'ส่งพิมพ์ทดสอบสำเร็จ';
+        s.textContent = subtitle || '';
+        actions.classList.remove('hidden');
+      } else if (state === 'error'){
+        icon.innerHTML = xmark;
+        t.textContent = title || 'พิมพ์ทดสอบไม่สำเร็จ';
+        s.textContent = subtitle || 'กรุณาลองใหม่อีกครั้ง';
+        actions.classList.remove('hidden');
+      }
+    }
+
+    async function testPrint(){
+      const id = document.getElementById('printerId').value.trim();
+      const resultEl = document.getElementById('testPrintResult');
+
+      if (!id){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'กรอก Printer ID ก่อน', '');
+        return;
+      }
+      if (!lineUid){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'ยังไม่ได้ล็อกอิน LINE', 'กรุณาเข้าสู่ระบบ LINE ก่อนทำรายการ');
+        return;
+      }
+
+      setTestBtnLoading(true);
+      if (resultEl) resultEl.textContent = '';
+      showLoadingOverlay(true);
+      setOverlayState('loading');
+
+      try{
+        const callUrl = apiUrl(`/test_printer/${encodeURIComponent(id)}`);
+        console.log('🔗 Calling test_printer:', callUrl);
+
+        const res = await fetch(callUrl, {
+          method: 'POST',
+          headers: { 'X-Line-Uid': lineUid }
+        });
+
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch { data = {}; }
+        console.log('🧪 test_printer response:', data);
+
+        if (res.ok && (data.status === 'ok' || data.status === 'OK')){
+          if (resultEl) {
+            resultEl.textContent = `✅ ส่งงานทดสอบแล้ว (ref_id: ${data.ref_id || '-'} | target: ${data.target_url || '-'})`;
+          }
+          setOverlayState('success', 'ส่งพิมพ์ทดสอบสำเร็จ', `ref_id: ${data.ref_id || '-'}`);
+        } else {
+          const msg = data?.message || text || 'Unknown error';
+          if (resultEl) resultEl.textContent = `⚠️ ไม่สำเร็จ: ${msg}`;
+          setOverlayState('error', 'พิมพ์ทดสอบไม่สำเร็จ', msg);
+        }
+      } catch(err){
+        console.error('test_printer error:', err);
+        if (resultEl) resultEl.textContent = '❌ เกิดข้อผิดพลาดระหว่างพิมพ์ทดสอบ';
+        setOverlayState('error', 'เกิดข้อผิดพลาดระหว่างพิมพ์', String(err));
+      } finally {
+        setTestBtnLoading(false);
+        // คง overlay ไว้ให้ผู้ใช้กดปิดเองหรือไปดูประวัติ
+      }
     }
 
     window.onload = initLiff;

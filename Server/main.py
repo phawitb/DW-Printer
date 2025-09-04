@@ -1145,3 +1145,106 @@ async def update_printer_name(
         "list_printers": updated.get("list_printers", []),
         "updated_fields": list(update_fields.keys()),
     }
+
+# === API: Test print with static/test.pdf ===
+# === API: Test print with static/test.pdf (with payment upsert) ===
+@app.post("/test_printer/{printer_id}")
+def test_printer(
+    printer_id: str,
+    x_line_uid: str = Header(...)
+):
+    """
+    พิมพ์ไฟล์ static/test.pdf ไปยัง node ของเครื่องพิมพ์ที่ระบุด้วย printer_id
+    และ 'จอง' เอกสาร payment ใน MongoDB ก่อน เพื่อให้ RPi อัปเดตสถานะผ่าน /update_status/{ref_id} ได้เสมอ
+    """
+    # 1) ตรวจสิทธิ์
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # 2) ตรวจว่าเครื่องพิมพ์มีอยู่ใน DB
+    pdoc = collection_printer.find_one({"printer_id": printer_id}, {"_id": 0})
+    if not pdoc:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    # 3) หาไฟล์ test.pdf
+    test_path = (Path(__file__).resolve().parent / "static" / "test.pdf")
+    if not test_path.exists():
+        raise HTTPException(status_code=404, detail=f"Test file not found: {test_path}")
+
+    # 4) นับจำนวนหน้า (ถ้าทำได้)
+    try:
+        reader = PdfReader(str(test_path))
+        total_pages = len(reader.pages)
+    except Exception:
+        total_pages = 0
+
+    # 5) เตรียม ref_id + jobs
+    ref_id = f"TEST_{printer_id}_{int(datetime.utcnow().timestamp())}"
+    job_entry = {
+        "filename": test_path.name,   # node อาจเปลี่ยนชื่อไฟล์ตอนอัปโหลด
+        "pages": "all",
+        "color": "bw",
+        "copies": 1,
+        "page_count": total_pages,
+        "price_per_page": 0,
+        "total_price": 0
+    }
+
+    selected = pdoc.get("selected_printer")
+
+    # 6) 👇 จองเอกสาร payment ไว้ก่อน (UPSERT)
+    #    เพื่อให้ /update_status/{ref_id} จาก RPi ไม่โดน 404 แม้เป็นงาน test
+    collection_payment.update_one(
+        {"ref_id": ref_id},
+        {
+            # สร้างครั้งแรกเท่านั้น
+            "$setOnInsert": {
+                "ref_id": ref_id,
+                "printer_id": printer_id,
+                "line_id": x_line_uid,
+                "jobs": [job_entry],
+                "total_amount": 0,
+                "total_pages": total_pages,
+                "payment_type": "test",
+                "created_at": datetime.utcnow(),
+            },
+            # อัปเดตสถานะล่าสุดให้เป็น submitted (กันกรณี ref_id ซ้ำโดยบังเอิญ)
+            "$set": {
+                "status": "submitted",
+                "completed_at": None
+            }
+        },
+        upsert=True
+    )
+
+    # 7) จัด payload ให้ node (RPi) ใช้งาน (ฝั่ง node คาดหวังให้ 'doc' เป็น JSON string form field)
+    send_doc = {
+        "ref_id": ref_id,
+        "line_id": x_line_uid,
+        "printer_id": printer_id,
+        "selected_printer": selected,
+        "jobs": [job_entry],
+        "total_amount": 0,
+        "total_pages": total_pages,
+        "status": "paid",   # จำลองเป็นจ่ายแล้วเพื่อทดสอบ pipeline ส่งงานพิมพ์
+        "created_at": datetime.utcnow().isoformat(),
+        "payment_type": "direct",
+        "note": "test_print_from_server"
+    }
+
+    latest_url, latest_ts = get_latest_url(printer_id)
+    if not latest_url:
+        raise HTTPException(status_code=503, detail="No printer URL available")
+
+    ok, msg = send_to_printer(str(test_path), send_doc)
+
+    return {
+        "status": "ok" if ok else "error",
+        "printer_id": printer_id,
+        "selected_printer": selected,
+        "target_url": latest_url,
+        "url_timestamp": latest_ts,
+        "ref_id": ref_id,
+        "total_pages": total_pages,
+        "message": msg
+    }
