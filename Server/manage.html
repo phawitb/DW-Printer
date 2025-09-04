@@ -102,23 +102,34 @@
           พิมพ์ทดสอบ
         </button>
 
-        <!-- NEW: Queue buttons -->
+        <!-- Queue & Status buttons -->
         <button type="button" onclick="checkQueue()" class="bg-gray-700 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-gray-800 transition w-full sm:w-auto">
           ตรวจสอบคิวงาน
         </button>
         <button type="button" onclick="cancelAllQueues()" class="bg-red-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-red-700 transition w-full sm:w-auto">
           ยกเลิกคิวทั้งหมด
         </button>
+        <button type="button" onclick="checkPrinterStatus()" class="bg-slate-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-slate-700 transition w-full sm:w-auto">
+          ตรวจสอบสถานะเครื่อง
+        </button>
       </div>
 
       <p id="saveResult" class="text-sm"></p>
       <p id="testPrintResult" class="text-sm text-gray-600"></p>
 
-      <!-- NEW: Queue result card -->
+      <!-- Queue result card -->
       <div id="queueResult" class="mt-4 hidden">
         <div class="card p-4">
           <h3 class="text-lg font-semibold mb-2">สถานะคิวงาน</h3>
           <div id="queueContent" class="text-sm text-gray-700 space-y-2"></div>
+        </div>
+      </div>
+
+      <!-- Printer status result card -->
+      <div id="statusResult" class="mt-4 hidden">
+        <div class="card p-4">
+          <h3 class="text-lg font-semibold mb-2">สถานะเครื่องพิมพ์ (CUPS)</h3>
+          <div id="statusContent" class="text-sm text-gray-700 space-y-2"></div>
         </div>
       </div>
     </form>
@@ -408,14 +419,14 @@
       }
     }
 
-    // ===== NEW: Queue helpers =====
+    // ===== NEW: Node base URL =====
     function getNodeBaseUrl(){
-      // ใช้ URL ของ node (Rpi) จากค่าที่โหลดมาในฟอร์ม
       const u = (document.getElementById('url')?.value || '').trim();
       if (u && /^https?:\/\//.test(u)) return u.replace(/\/+$/,'');
-      return ""; // ถ้าไม่มีให้รีพอร์ตเออเรอร์
+      return "";
     }
 
+    // ===== NEW: Queue render =====
     function renderQueueList(list){
       const wrap = document.getElementById('queueResult');
       const content = document.getElementById('queueContent');
@@ -476,18 +487,73 @@
       try{
         const res = await fetch(`${base}/printer/cancel_all`, { method: 'POST' });
         const data = await res.json();
-        // รีเฟรชรายการคิวหลังยกเลิก
+        // refresh queue
         try{
           const selected = document.getElementById('selected_printer')?.value;
           const url = selected ? `${base}/printer/queue?printer=${encodeURIComponent(selected)}` : `${base}/printer/queue`;
           const res2 = await fetch(url);
           const data2 = await res2.json();
           renderQueueList(data2.jobs || []);
-        }catch(e){ /* เงียบไว้ */ }
+        }catch(e){}
 
         setOverlayState('success', 'ยกเลิกคิวทั้งหมดสำเร็จ', `ยกเลิกแล้ว ${data.canceled ?? 0} งาน`);
       } catch(e){
         setOverlayState('error', 'ยกเลิกคิวไม่สำเร็จ', String(e));
+      }
+    }
+
+    // ===== NEW: Printer status =====
+    function renderStatus(data){
+      const wrap = document.getElementById('statusResult');
+      const content = document.getElementById('statusContent');
+      if (!wrap || !content) return;
+      wrap.classList.remove('hidden');
+
+      if (!data || !Array.isArray(data.printers)){
+        content.innerHTML = `<p class="text-red-600">อ่านสถานะไม่สำเร็จ</p>`;
+        return;
+      }
+
+      const defaultName = data.default ? `<span class="px-2 py-0.5 text-xs bg-blue-100 text-blue-700 rounded-full ml-2">default: ${data.default}</span>` : '';
+      const printersHtml = data.printers.map(p => {
+        const enabled = /enabled/.test(p.state) && !/disabled/.test(p.state);
+        const badge = enabled
+          ? `<span class="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded-full">enabled</span>`
+          : `<span class="px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">disabled</span>`;
+        return `
+          <div class="p-2 border rounded-lg">
+            <div class="flex items-center gap-2">
+              <div class="font-semibold">${p.name || '-'}</div>
+              ${badge}
+            </div>
+            <div class="text-xs text-gray-600 mt-1">${p.state || '-'}</div>
+          </div>
+        `;
+      }).join('');
+
+      content.innerHTML = `
+        <div class="mb-2 text-sm text-gray-600">สถานะจาก CUPS ${defaultName}</div>
+        <div class="space-y-2">${printersHtml}</div>
+      `;
+    }
+
+    async function checkPrinterStatus(){
+      const base = getNodeBaseUrl();
+      if (!base){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'ไม่พบ URL ของเครื่องพิมพ์', 'กรุณาโหลดข้อมูลเครื่องก่อน');
+        return;
+      }
+      showLoadingOverlay(true);
+      setOverlayState('loading', 'กำลังตรวจสอบสถานะเครื่อง...', '');
+
+      try{
+        const res = await fetch(`${base}/printer/status`, { method: 'GET' });
+        const data = await res.json();
+        renderStatus(data);
+        setOverlayState('success', 'ดึงสถานะเครื่องสำเร็จ', '');
+      } catch(e){
+        setOverlayState('error', 'ดึงสถานะเครื่องไม่สำเร็จ', String(e));
       }
     }
 
