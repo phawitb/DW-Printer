@@ -101,9 +101,26 @@
         <button type="button" id="btnTestPrint" onclick="testPrint()" class="bg-indigo-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-indigo-700 transition w-full sm:w-auto">
           พิมพ์ทดสอบ
         </button>
+
+        <!-- NEW: Queue buttons -->
+        <button type="button" onclick="checkQueue()" class="bg-gray-700 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-gray-800 transition w-full sm:w-auto">
+          ตรวจสอบคิวงาน
+        </button>
+        <button type="button" onclick="cancelAllQueues()" class="bg-red-600 text-white px-6 py-3 rounded-lg text-lg font-semibold hover:bg-red-700 transition w-full sm:w-auto">
+          ยกเลิกคิวทั้งหมด
+        </button>
       </div>
+
       <p id="saveResult" class="text-sm"></p>
       <p id="testPrintResult" class="text-sm text-gray-600"></p>
+
+      <!-- NEW: Queue result card -->
+      <div id="queueResult" class="mt-4 hidden">
+        <div class="card p-4">
+          <h3 class="text-lg font-semibold mb-2">สถานะคิวงาน</h3>
+          <div id="queueContent" class="text-sm text-gray-700 space-y-2"></div>
+        </div>
+      </div>
     </form>
   </div>
 
@@ -278,7 +295,6 @@
         if (res.ok){
           console.log("📌 update_printer response:", data);
           setInlineMsg('saveResult', true, data.message || 'บันทึกสำเร็จ');
-          // ดึงค่าล่าสุดเพื่อรีเฟรชค่าในฟอร์มจาก DB
           await loadPrinter();
         } else {
           console.error('update_printer failed:', text);
@@ -332,18 +348,18 @@
 
       if (state === 'loading'){
         icon.innerHTML = spinner;
-        t.textContent = title || 'กำลังพิมพ์...';
-        s.textContent = subtitle || 'กำลังส่งไฟล์ทดสอบไปยังเครื่องพิมพ์';
+        t.textContent = title || 'กำลังทำรายการ...';
+        s.textContent = subtitle || '';
         actions.classList.add('hidden');
       } else if (state === 'success'){
         icon.innerHTML = check;
-        t.textContent = title || 'ส่งพิมพ์ทดสอบสำเร็จ';
+        t.textContent = title || 'สำเร็จ';
         s.textContent = subtitle || '';
         actions.classList.remove('hidden');
       } else if (state === 'error'){
         icon.innerHTML = xmark;
-        t.textContent = title || 'พิมพ์ทดสอบไม่สำเร็จ';
-        s.textContent = subtitle || 'กรุณาลองใหม่อีกครั้ง';
+        t.textContent = title || 'ไม่สำเร็จ';
+        s.textContent = subtitle || '';
         actions.classList.remove('hidden');
       }
     }
@@ -366,20 +382,13 @@
       setTestBtnLoading(true);
       if (resultEl) resultEl.textContent = '';
       showLoadingOverlay(true);
-      setOverlayState('loading');
+      setOverlayState('loading', 'กำลังพิมพ์ทดสอบ...', 'กำลังส่งไฟล์ไปยังเครื่องพิมพ์');
 
       try{
         const callUrl = apiUrl(`/test_printer/${encodeURIComponent(id)}`);
-        console.log('🔗 Calling test_printer:', callUrl);
-
-        const res = await fetch(callUrl, {
-          method: 'POST',
-          headers: { 'X-Line-Uid': lineUid }
-        });
-
+        const res = await fetch(callUrl, { method: 'POST', headers: { 'X-Line-Uid': lineUid } });
         const text = await res.text();
         let data; try { data = JSON.parse(text); } catch { data = {}; }
-        console.log('🧪 test_printer response:', data);
 
         if (res.ok && (data.status === 'ok' || data.status === 'OK')){
           if (resultEl) {
@@ -392,12 +401,93 @@
           setOverlayState('error', 'พิมพ์ทดสอบไม่สำเร็จ', msg);
         }
       } catch(err){
-        console.error('test_printer error:', err);
         if (resultEl) resultEl.textContent = '❌ เกิดข้อผิดพลาดระหว่างพิมพ์ทดสอบ';
         setOverlayState('error', 'เกิดข้อผิดพลาดระหว่างพิมพ์', String(err));
       } finally {
         setTestBtnLoading(false);
-        // คง overlay ไว้ให้ผู้ใช้กดปิดเองหรือไปดูประวัติ
+      }
+    }
+
+    // ===== NEW: Queue helpers =====
+    function getNodeBaseUrl(){
+      // ใช้ URL ของ node (Rpi) จากค่าที่โหลดมาในฟอร์ม
+      const u = (document.getElementById('url')?.value || '').trim();
+      if (u && /^https?:\/\//.test(u)) return u.replace(/\/+$/,'');
+      return ""; // ถ้าไม่มีให้รีพอร์ตเออเรอร์
+    }
+
+    function renderQueueList(list){
+      const wrap = document.getElementById('queueResult');
+      const content = document.getElementById('queueContent');
+      if (!wrap || !content) return;
+      wrap.classList.remove('hidden');
+
+      if (!list || list.length === 0){
+        content.innerHTML = `<p class="text-gray-500">ไม่มีงานค้างในคิว</p>`;
+        return;
+      }
+
+      const html = list.map(j => {
+        const age = (j.age_minutes !== null && j.age_minutes !== undefined) ? `${j.age_minutes} นาที` : '-';
+        return `
+          <div class="p-2 border rounded-lg">
+            <div class="font-semibold">${j.job || '-'}</div>
+            <div class="text-xs text-gray-600">ผู้ใช้: ${j.user || '-'} | ขนาด: ${j.size_bytes || '-'} | อายุงาน: ${age}</div>
+            <div class="text-xs text-gray-500">ส่งเมื่อ: ${j.submitted_at || '-'}</div>
+          </div>
+        `;
+      }).join('');
+      content.innerHTML = html;
+    }
+
+    async function checkQueue(){
+      const base = getNodeBaseUrl();
+      if (!base){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'ไม่พบ URL ของเครื่องพิมพ์', 'กรุณาโหลดข้อมูลเครื่องก่อน');
+        return;
+      }
+      const selected = document.getElementById('selected_printer')?.value;
+      const url = selected ? `${base}/printer/queue?printer=${encodeURIComponent(selected)}` : `${base}/printer/queue`;
+
+      showLoadingOverlay(true);
+      setOverlayState('loading', 'กำลังตรวจสอบคิวงาน...', '');
+
+      try{
+        const res = await fetch(url, { method: 'GET' });
+        const data = await res.json();
+        renderQueueList(data.jobs || []);
+        setOverlayState('success', 'ดึงคิวงานสำเร็จ', `พบ ${data.jobs?.length || 0} งาน`);
+      } catch(e){
+        setOverlayState('error', 'ดึงคิวงานไม่สำเร็จ', String(e));
+      }
+    }
+
+    async function cancelAllQueues(){
+      const base = getNodeBaseUrl();
+      if (!base){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'ไม่พบ URL ของเครื่องพิมพ์', 'กรุณาโหลดข้อมูลเครื่องก่อน');
+        return;
+      }
+      showLoadingOverlay(true);
+      setOverlayState('loading', 'กำลังยกเลิกคิวทั้งหมด...', '');
+
+      try{
+        const res = await fetch(`${base}/printer/cancel_all`, { method: 'POST' });
+        const data = await res.json();
+        // รีเฟรชรายการคิวหลังยกเลิก
+        try{
+          const selected = document.getElementById('selected_printer')?.value;
+          const url = selected ? `${base}/printer/queue?printer=${encodeURIComponent(selected)}` : `${base}/printer/queue`;
+          const res2 = await fetch(url);
+          const data2 = await res2.json();
+          renderQueueList(data2.jobs || []);
+        }catch(e){ /* เงียบไว้ */ }
+
+        setOverlayState('success', 'ยกเลิกคิวทั้งหมดสำเร็จ', `ยกเลิกแล้ว ${data.canceled ?? 0} งาน`);
+      } catch(e){
+        setOverlayState('error', 'ยกเลิกคิวไม่สำเร็จ', String(e));
       }
     }
 
