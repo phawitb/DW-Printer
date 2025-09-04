@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from linebot import LineBotApi, WebhookHandler
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, FileMessage
-from pymongo import MongoClient
+from pymongo import MongoClient, ReturnDocument
 from bson import ObjectId
 import base64, os, requests, math, re
 from io import BytesIO
@@ -19,6 +19,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from fastapi import UploadFile, File, Form, Header
 from zoneinfo import ZoneInfo
+
 
 def load_config():
     path = Path(__file__).resolve().parent / "static" / "config.json"
@@ -799,26 +800,25 @@ def get_config():
     }
 
 
-
 @app.post("/update_printer_url")
 def update_printer_url(
     printer_id: str = Form(...),
     url: str = Form(...)
 ):
     try:
-        result = collection_printer.update_one(
+        now = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
+        res = collection_printer.find_one_and_update(
             {"printer_id": printer_id},
-            {"$set": {"url": url}}
+            {"$setOnInsert": {"created_at": now, "name": printer_id},
+             "$set": {"url": url, "last_seen": now}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER
         )
-
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
-
-        return {"status": "ok", "message": f"Updated URL for {printer_id} to {url}"}
-
+        return {"status": "ok", "printer": {k: v for k, v in res.items() if k != "_id"}}
     except Exception as e:
         print(f"❌ Error in update_printer_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # === Serve manage.html ===
@@ -980,29 +980,27 @@ def debug_authen():
 def update_printer_status(
     printer_id: str,
     status: str = Form("online"),
-    last_seen: str = Form(None)   # 👈 client อาจส่งเวลามา หรือไม่ส่งก็ได้
+    last_seen: str = Form(None)
 ):
     try:
         if last_seen is None:
-            # ถ้า client ไม่ส่ง → ใช้เวลาประเทศไทยปัจจุบัน
             last_seen = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
 
-        result = collection_printer.update_one(
+        res = collection_printer.find_one_and_update(
             {"printer_id": printer_id},
-            {"$set": {"last_seen": last_seen, "status": status}}
+            {"$setOnInsert": {"created_at": last_seen, "name": printer_id},
+             "$set": {"last_seen": last_seen, "status": status}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER
         )
-
-        if result.matched_count == 0:
-            raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
 
         return {
             "status": "ok",
-            "printer_id": printer_id,
-            "last_seen": last_seen,
-            "set_status": status
+            "printer": {k: v for k, v in res.items() if k != "_id"}
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 # === API: Get printer name/list from MongoDB ===
 @app.get("/get_printer_name/{printer_id}")
@@ -1248,3 +1246,34 @@ def test_printer(
         "total_pages": total_pages,
         "message": msg
     }
+
+
+
+
+@app.post("/register_printer")
+def register_printer(
+    printer_id: str = Form(...),
+    name: str = Form(None),
+    port: int = Form(None),
+    status: str = Form("online"),
+    url: str = Form("")
+):
+    tz = ZoneInfo("Asia/Bangkok")
+    now = datetime.now(tz).strftime("%Y-%m-%d %H:%M:%S")
+
+    doc = {
+        "printer_id": printer_id,
+        "name": name or printer_id,
+        "port": port,
+        "status": status,
+        "url": url,
+        "last_seen": now,
+    }
+    res = collection_printer.find_one_and_update(
+        {"printer_id": printer_id},
+        {"$setOnInsert": {"created_at": now},
+         "$set": doc},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
+    return {"ok": True, "printer": res}
