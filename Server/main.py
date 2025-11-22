@@ -205,7 +205,7 @@ def send_to_printer(PDF_FILE: str, doc: dict):
             files = {"file": (os.path.basename(PDF_FILE), f, "application/pdf")}
             data = {
                 "doc": json.dumps(doc, ensure_ascii=False, default=str)
-            }  # backend expects string
+            }
 
             r = requests.post(api_url, files=files, data=data, timeout=(10, 40))
 
@@ -224,7 +224,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     phi1, lam1, phi2, lam2 = map(math.radians, [lat1, lon1, lat2, lon2])
     dphi = phi2 - phi1
-    dlam = lam2 - lon1
+    dlam = phi2 - lon1
     dlam = math.radians(lon2 - lon1)
     a = (
         math.sin(dphi / 2) ** 2
@@ -269,6 +269,11 @@ def generate_qr(
     line_id: str = Query(...),
     total_pages: int = Query(...),
     jobs: str = Query(...),
+    # ✅ เพิ่มให้สามารถเลือก PromptPay ID ได้ (optional)
+    prompay_id: Optional[str] = Query(
+        None,
+        description="PromptPay ID/เบอร์ของร้าน ถ้าไม่ส่งจะใช้ default ของ Payment Gateway",
+    ),
 ):
     """
     1) รับ amount จาก frontend (ราคาที่คำนวณจากงานพิมพ์)
@@ -285,6 +290,10 @@ def generate_qr(
             "amount": amount,
             "description": description,
         }
+
+        # ✅ ถ้ามี prompay_id จาก frontend ให้ส่งไปที่ Payment Gateway ด้วย
+        if prompay_id:
+            payload["prompay_id"] = prompay_id
 
         try:
             r = requests.post(
@@ -303,10 +312,13 @@ def generate_qr(
         pay_amount = float(pay_data.get("pay_amount", amount))
         discount = float(pay_data.get("discount", 0.0))
         unique_suffix = pay_data.get("unique_suffix", 0)
+
+        # ✅ ตอนนี้ Payment Gateway ใช้ฟิลด์ชื่อ prompay_id (ไม่ใช่ phone_number แล้ว)
+        gateway_prompay_id = pay_data.get("prompay_id")
+
         qr_b64 = pay_data.get("qr_base64")
         gateway_status = pay_data.get("status", "PENDING")
         gateway_payload = pay_data.get("payload")
-        gateway_phone_number = pay_data.get("phone_number")
 
         if not qr_b64 or not gateway_payment_id:
             raise HTTPException(
@@ -326,6 +338,7 @@ def generate_qr(
         elif gateway_status == "CANCELLED":
             internal_status = "cancelled"
 
+        # ✅ เก็บทั้ง prompay_id และ field เดิม phone_number/gateway_phone_number ไว้เพื่อ compat
         payment_doc = {
             "line_id": line_id,
             "printer_id": printer_id,
@@ -342,7 +355,15 @@ def generate_qr(
             "pay_amount": pay_amount,
             "discount": discount,
             "unique_suffix": unique_suffix,
-            "phone_number": gateway_phone_number,
+
+            # === NEW FIELDS ===
+            "prompay_id": gateway_prompay_id,
+            "gateway_prompay_id": gateway_prompay_id,
+
+            # === BACKWARD COMPAT (ใน DB เดิมใช้ phone_number) ===
+            "phone_number": gateway_prompay_id,
+            "gateway_phone_number": gateway_prompay_id,
+
             # ข้อมูลดิบของ gateway
             "gateway_payment_id": gateway_payment_id,
             "gateway_base_amount": base_amount,
@@ -350,7 +371,6 @@ def generate_qr(
             "gateway_discount": discount,
             "gateway_status": gateway_status,
             "gateway_payload": gateway_payload,
-            "gateway_phone_number": gateway_phone_number,
         }
         result = collection_payment.insert_one(payment_doc)
         mongo_payment_id = str(result.inserted_id)
@@ -367,6 +387,7 @@ def generate_qr(
         }
 
         # ✅ ตอบ JSON ให้ index.html ใช้ branch content-type == application/json
+        #    ส่งทั้ง prompay_id และ phone_number ให้ front ใช้อย่างใดอย่างหนึ่งตามเวอร์ชัน
         return JSONResponse(
             content={
                 "qr_url": qr_url,
@@ -376,7 +397,9 @@ def generate_qr(
                 "pay_amount": pay_amount,
                 "discount": discount,
                 "unique_suffix": unique_suffix,
-                "phone_number": gateway_phone_number,
+
+                "prompay_id": gateway_prompay_id,     # ใหม่ (ตรงกับ Payment Gateway)
+                "phone_number": gateway_prompay_id,   # เก็บไว้เพื่อ compat เดิม
                 "status": internal_status,
             },
             headers=headers,
@@ -748,7 +771,6 @@ def get_payment_history(line_id: str):
     docs = list(collection_payment.find({"line_id": line_id}))
     serialized_docs = [serialize_doc(doc) for doc in docs]
     serialized_docs = convert_data_timezone(serialized_docs)
-    # ตอนนี้แต่ละ history จะมี field base_amount, pay_amount, discount แล้ว
     return {"history": serialized_docs}
 
 
