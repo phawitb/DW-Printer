@@ -286,9 +286,11 @@ def generate_qr(
 
         description = f"Print {total_pages} pages @ {printer_id} ({line_id})"
 
+        # 👇👇 ตรงนี้คือจุดสำคัญ: ส่ง user_id = line_id ไปยัง Payment Gateway
         payload = {
             "amount": amount,
             "description": description,
+            "user_id": line_id,   # <--- เพิ่มบรรทัดนี้
         }
 
         # ✅ ถ้ามี prompay_id จาก frontend ให้ส่งไปที่ Payment Gateway ด้วย
@@ -410,6 +412,7 @@ def generate_qr(
     except Exception as e:
         print(f"Error in generate_qr: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 
 # === UPDATED: check payment โดย sync กับ Payment Gateway ใหม่ + เก็บ amount/discount ล่าสุด ===
