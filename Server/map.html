@@ -27,9 +27,8 @@
     .rainbow-text { animation: rainbow 4s linear infinite; }
     .offline {
       filter: grayscale(100%);
-      opacity: 0.7; /* ทำให้ดูหม่นลง */
+      opacity: 0.7;
     }
-
   </style>
 </head>
 <body class="bg-gray-100 p-6 md:p-12">
@@ -48,8 +47,6 @@
         </button>
       </div>
     </div>
-    
-    
 
     <div class="flex space-x-2">
       <button id="list-tab" class="tab-btn tab-active">
@@ -87,7 +84,7 @@
     let userCoords = null;
     let map;
     let lineId = new URLSearchParams(window.location.search).get("uid");
-    let userMarker = null; // ✅ circle ของผู้ใช้
+    let userMarker = null; // circle ของผู้ใช้
 
     // --- Icon paths ---
     const printerIconPath = "images/printer.png";
@@ -156,6 +153,23 @@
       });
     }
 
+    // ✅ ช่วยเช็คว่า offline ไม่เกิน N วัน
+    // ใช้ field printer.last_seen เป็น timestamp วินาที หรือ ISO string
+    function isOfflineWithinDays(printer, days = 3) {
+      if (!printer.last_seen) return false;
+      let lastSec;
+      if (typeof printer.last_seen === "number") {
+        lastSec = printer.last_seen;
+      } else {
+        const parsed = Date.parse(printer.last_seen);
+        if (isNaN(parsed)) return false;
+        lastSec = parsed / 1000;
+      }
+      const nowSec = Date.now() / 1000;
+      const diffDays = (nowSec - lastSec) / 86400;
+      return diffDays <= days;
+    }
+
     async function loadPrinters() {
       const listView = document.getElementById("list-view");
       const loadingSpinner = document.getElementById("loading-spinner");
@@ -179,16 +193,24 @@
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         const data = await res.json();
-        data.printers.forEach(p => { printerMap[p.printer_id] = p; });
-        renderListView(data.printers);
-        renderMapView(data.printers);
+
+        // ✅ filter: online ทั้งหมด + offline ที่ไม่เกิน 3 วัน
+        let printers = (data.printers || []).filter(p => {
+          if (p.status === 'online') return true;
+          if (p.status === 'offline') return isOfflineWithinDays(p, 3);
+          return false;
+        });
+
+        printers.forEach(p => { printerMap[p.printer_id] = p; });
+        renderListView(printers);
+        renderMapView(printers);
       } catch (err) {
+        console.error(err);
         listView.innerHTML = `<p class='text-red-600 text-center'>${t.loadingFailed}</p>`;
       } finally {
         loadingSpinner.classList.add('hidden');
       }
     }
-
 
     function isPrinterOpen(printer) {
       if (!printer.open_time || !printer.close_time) return true;
@@ -213,7 +235,7 @@
       const lang = isThai ? 'th' : 'en';
       const t = translations[lang];
 
-      if (printers.length === 0) {
+      if (!printers || printers.length === 0) {
         listView.innerHTML = `<p class='text-gray-500 text-center'>${t.noPrinterFound}</p>`;
         return;
       }
@@ -227,10 +249,8 @@
       listView.innerHTML = '';
       printers.forEach(printer => {
         const card = document.createElement("div");
-        // card.className = `card p-4 space-y-3 ${printer.status !== 'online' ? 'opacity-60 bg-gray-50' : ''}`;
         card.className = `card p-4 space-y-3 ${printer.status === 'offline' ? 'offline bg-gray-50' : ''}`;
 
-        
         let statusText, statusClass;
         if (printer.status === 'online') {
           if (isPrinterOpen(printer)) {
@@ -278,17 +298,6 @@
              </a>`
           : '';
 
-        // card.innerHTML = `
-        //     <div class="flex items-start justify-between">
-        //         <h4 class="text-lg font-semibold">${printer.location_name}</h4>
-        //         <span class="text-sm font-medium ${statusClass}">${statusText}</span>
-        //     </div>
-        //     ${typeAndPriceHtml}
-        //     <div class="flex gap-2 pt-2">
-        //         ${selectBtn}
-        //         ${navBtn}
-        //     </div>`;
-
         card.innerHTML = `
         <div>
             <h4 class="text-lg font-semibold ${statusClass}">${printer.location_name}</h4>
@@ -299,7 +308,6 @@
             ${selectBtn}
             ${navBtn}
         </div>`;
-
 
         listView.appendChild(card);
       });
@@ -321,7 +329,7 @@
         if (layer instanceof L.Marker) map.removeLayer(layer); 
       });
 
-      // ✅ วาดตำแหน่งผู้ใช้ (ถ้า userCoords มีค่า)
+      // วาดตำแหน่งผู้ใช้ (ถ้ามี)
       if (userCoords) {
         if (!userMarker) {
           userMarker = L.circleMarker([userCoords.lat, userCoords.lon], {
@@ -333,7 +341,8 @@
         }
       }
 
-      // วาด printer
+      if (!printers) return;
+
       printers.forEach(printer => {
         if (printer.lat && printer.lon) {
           let marker, popupContent, statusText, icon;
@@ -424,8 +433,6 @@
       );
     }
 
-
-
     document.getElementById('list-tab').addEventListener('click', () => {
       document.getElementById('list-view').classList.remove('hidden');
       document.getElementById('map-view').classList.add('hidden');
@@ -452,8 +459,9 @@
     });
 
     (async () => {
+      await loadConfig();
       await loadPrinters();
-      watchUserPosition();   // ✅ เริ่ม track GPS user ตลอดเวลา
+      watchUserPosition();
       updateLanguage('th');
 
       const urlParams = new URLSearchParams(window.location.search);

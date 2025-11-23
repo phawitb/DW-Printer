@@ -3,12 +3,15 @@ from fastapi.responses import JSONResponse, Response, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from linebot import LineBotApi, WebhookHandler
-from linebot.models import MessageEvent, TextMessage, TextSendMessage, FileMessage
+from linebot.models import MessageEvent, TextMessage, TextSendMessage, FileMessage, FlexSendMessage
 from pymongo import MongoClient, ReturnDocument
 from bson import ObjectId
 from pdf2image import convert_from_path
 from PyPDF2 import PdfReader
-from pytz import timezone
+# from pytz import timezone
+# from zoneinfo import ZoneInfo
+# from datetime import datetime, timedelta
+
 from zoneinfo import ZoneInfo
 
 import base64
@@ -22,6 +25,7 @@ from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode
 
 
 def load_config():
@@ -520,14 +524,93 @@ async def pay_completed(request: Request):
             )
             doc.update({"status": status})
 
+        # ✅ Push LINE ด้วย Flex card แทนข้อความธรรมดา
         if line_id:
             try:
+                history_url = f"{FRONTEND_BASE_URL}/historys.html"
+
+                flex_contents = {
+                    "type": "bubble",
+                    "size": "kilo",
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "spacing": "md",
+                        "paddingAll": "16px",
+                        "contents": [
+                            {
+                                "type": "text",
+                                "text": "✅ การสั่งพิมพ์ถูกยืนยันแล้ว",
+                                "weight": "bold",
+                                "size": "lg",
+                                "wrap": True,
+                            },
+                            {
+                                "type": "text",
+                                "text": "ระบบได้รับการชำระเงินเรียบร้อยแล้ว และกำลังดำเนินการพิมพ์ให้คุณ",
+                                "size": "sm",
+                                "color": "#666666",
+                                "wrap": True,
+                                "margin": "md",
+                            },
+                            {
+                                "type": "separator",
+                                "margin": "md"
+                            },
+                            {
+                                "type": "box",
+                                "layout": "vertical",
+                                "margin": "md",
+                                "spacing": "xs",
+                                "contents": [
+                                    {
+                                        "type": "text",
+                                        "text": f"Ref ID: {ref_id}",
+                                        "size": "xs",
+                                        "color": "#999999",
+                                        "wrap": True,
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"ยอดชำระ: {total_amount} บาท",
+                                        "size": "xs",
+                                        "color": "#999999",
+                                        "wrap": True,
+                                    },
+                                    {
+                                        "type": "text",
+                                        "text": f"จำนวนหน้า: {total_pages}",
+                                        "size": "xs",
+                                        "color": "#999999",
+                                        "wrap": True,
+                                    },
+                                ],
+                            },
+                            {
+                                "type": "button",
+                                "style": "primary",
+                                "height": "sm",
+                                "margin": "md",
+                                "action": {
+                                    "type": "uri",
+                                    "label": "ดูสถานะงานพิมพ์",
+                                    "uri": history_url,
+                                },
+                            },
+                        ],
+                    },
+                    "styles": {
+                        "body": {
+                            "backgroundColor": "#FFFFFF"
+                        }
+                    },
+                }
+
                 line_bot_api.push_message(
                     line_id,
-                    TextSendMessage(
-                        text="✅ การสั่งพิมพ์ถูกยืนยันแล้ว\nตรวจสอบสถานะได้ที่: {}/historys.html".format(
-                            FRONTEND_BASE_URL
-                        )
+                    FlexSendMessage(
+                        alt_text="การสั่งพิมพ์ถูกยืนยันแล้ว",
+                        contents=flex_contents,
                     ),
                 )
             except Exception as e:
@@ -602,28 +685,32 @@ def get_all_printer(
 ):
     printers = list(collection_printer.find({}, {"_id": 0}))
 
-    tz = timezone("Asia/Bangkok")
+    tz = ZoneInfo("Asia/Bangkok")
     now = datetime.now(tz)
+
     for p in printers:
         last_seen = p.get("last_seen")
         status = "offline"
         try:
             if last_seen:
                 if isinstance(last_seen, str):
+                    # รองรับทั้ง
+                    # "2025-11-23 15:59:46" (ไม่มี tz)
+                    # "2025-11-23 15:59:46+06:42" (มี tz แปลก ๆ จากของเก่า)
                     last_seen = datetime.fromisoformat(last_seen)
-                    if last_seen.tzinfo is None:
-                        last_seen = last_seen.replace(tzinfo=tz)
-                elif isinstance(last_seen, datetime):
-                    if last_seen.tzinfo is None:
-                        last_seen = last_seen.replace(tzinfo=tz)
-                else:
+                elif not isinstance(last_seen, datetime):
                     last_seen = None
 
                 if last_seen:
-                    last_seen = last_seen.astimezone(tz)
+                    # ✨ บังคับตีความว่าเวลานี้เป็นเวลาไทย (+07:00) โดย **ไม่เลื่อนเลขชั่วโมง**
+                    # เช่น "2025-09-04 17:20:57" -> "2025-09-04 17:20:57+07:00"
+                    # หรือ "2025-09-04 17:20:57+06:42" -> "2025-09-04 17:20:57+07:00"
+                    last_seen = last_seen.replace(tzinfo=tz)
+
                     delta = now - last_seen
                     print(f"🕒 now: {now} | last_seen: {last_seen} | delta: {delta}")
 
+                    # ออนไลน์ถ้าไม่เกิน 2 นาที
                     if delta <= timedelta(minutes=2):
                         status = "online"
         except Exception as e:
@@ -632,6 +719,7 @@ def get_all_printer(
 
         p["status"] = status
 
+    # ด้านล่างเหมือนเดิม
     if not get_show_offline_setting():
         printers = [p for p in printers if p.get("status") == "online"]
 
@@ -655,6 +743,7 @@ def get_all_printer(
 
     ordered = sorted(printers, key=lambda p: str(p.get("location_name", "")))
     return {"printers": ordered, "sorted_by": "location_name"}
+
 
 
 @app.get("/list-pdfs/{line_id}")
@@ -748,15 +837,82 @@ def handle_file_message(event):
     message_id = event.message.id
     file_name = event.message.file_name
     user_id = event.source.user_id
+
     user_dir = os.path.join(PDF_DIR, user_id)
     os.makedirs(user_dir, exist_ok=True)
     save_path = os.path.join(user_dir, file_name)
+
     file_content = line_bot_api.get_message_content(message_id).content
     with open(save_path, "wb") as f:
         f.write(file_content)
+
     cleanup_pdfs()
-    reply_text = f"บันทึกไฟล์ {file_name} เรียบร้อยแล้ว!\n{FRONTEND_BASE_URL}"
-    line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+
+    # เดิม: reply_text = f"บันทึกไฟล์ {file_name} เรียบร้อยแล้ว!\n{FRONTEND_BASE_URL}"
+    # เปลี่ยนเป็น Flex card modern minimal
+    query = urlencode({"uid": user_id})
+    front_url = f"{FRONTEND_BASE_URL}?{query}"
+
+    flex_contents = {
+        "type": "bubble",
+        "size": "kilo",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "md",
+            "paddingAll": "16px",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "ไฟล์อัปโหลดสำเร็จ",
+                    "weight": "bold",
+                    "size": "lg",
+                },
+                {
+                    "type": "text",
+                    "text": file_name,
+                    "size": "sm",
+                    "color": "#888888",
+                    "wrap": True,
+                },
+                {
+                    "type": "separator",
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": "คุณสามารถตั้งค่าการพิมพ์และยืนยันการสั่งพิมพ์ได้จากหน้าเว็บ",
+                    "size": "sm",
+                    "wrap": True,
+                    "margin": "md"
+                },
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "height": "sm",
+                    "margin": "md",
+                    "action": {
+                        "type": "uri",
+                        "label": "เปิดหน้า DeepPrinter",
+                        "uri": front_url
+                    }
+                }
+            ],
+        },
+        "styles": {
+            "body": {
+                "backgroundColor": "#FFFFFF"
+            }
+        }
+    }
+
+    line_bot_api.reply_message(
+        event.reply_token,
+        FlexSendMessage(
+            alt_text=f"บันทึกไฟล์ {file_name} เรียบร้อยแล้ว!",
+            contents=flex_contents,
+        ),
+    )
 
 
 def serialize_doc(doc):

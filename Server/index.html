@@ -37,7 +37,7 @@
       transform: translateY(-2px);
       box-shadow:
         0 10px 15px -3px rgb(0 0 0 / 0.1),
-        0 4px 6px -4px rgb(0 0 0 / 0.1);
+        0 4px 6px -4 rgb(0 0 0 / 0.1);
     }
     .primary-btn {
       background-color: var(--primary-color);
@@ -193,7 +193,7 @@
     let userCoords = null;
     let selectedPrinterId = null;
     let lineId = null;
-    let hasSentPrintJob = false;     // ✅ กันยิง pay_completed ซ้ำ
+    let hasSentPrintJob = false;     // กันยิง pay_completed ซ้ำ
 
     // ===== I18N =====
     const translations = {
@@ -239,9 +239,9 @@
         printCopies: "สำนวน:",
         version: "ฉบับ",
         backToHome: "กลับสู่หน้าหลัก",
-        confirmPrintBtn: "ยืนยันการสั่งพิมพ์",
         errorReadingLineId: "ไม่สามารถอ่าน LINE UID ได้",
         discount: "ส่วนลด:",
+        checkHistory: "ตรวจสอบสถานะการพิมพ์",   // ✅ ปุ่มไปหน้า history
       },
       en: {
         title: "DeepPrinter",
@@ -289,6 +289,7 @@
         uploadSuccess: "Upload successful",
         confirmPrintBtn: "Confirm Print",
         discount: "Discount:",
+        checkHistory: "Check print status",     // ✅ ปุ่มไปหน้า history
       }
     };
 
@@ -322,7 +323,8 @@
       if (selectedPrinterId) {
         const printer = printerMap[selectedPrinterId];
         if (printer) {
-          printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+          const displayName = printer.location_name || printer.printer_id;
+          printerDisplayText.textContent = displayName;
         }
       } else {
         printerDisplayText.textContent = langData.selectPlaceholder;
@@ -393,7 +395,9 @@
         
         if (selectedPrinterId && printerMap[selectedPrinterId]) {
           const printer = printerMap[selectedPrinterId];
-          printerDisplayText.textContent = `${printer.printer_id} - ${printer.location_name}`;
+          const displayName = printer.location_name || printer.printer_id;
+
+          printerDisplayText.textContent = displayName;
           selectedPrinterIdInput.value = selectedPrinterId;
         } else {
           printerDisplayText.textContent = t.selectPlaceholder;
@@ -681,21 +685,19 @@
       const printerId = document.getElementById("selected-printer-id").value;
       const printer = printerMap[printerId];
 
-      // ✅ reset state รอบใหม่
       hasSentPrintJob = false;
       currentRefId = null;
 
       if (!printer) { alert(langData.noPrinterSelected); return; }
       if (!lineId) { alert("ไม่พบ LINE ID"); return; }
 
-      // สร้าง jobs
       currentPrintJobs = [];
       let total = 0, totalPages = 0;
       for (const card of document.querySelectorAll(".pdf-card")) {
         const checkbox = card.querySelector("input[name='print-select']");
         if (checkbox && checkbox.checked) {
-          const index = checkbox.dataset.index;                 // 1-based
-          const filename = checkbox.value;                      // ใช้สำหรับ error message
+          const index = checkbox.dataset.index;                 
+          const filename = checkbox.value;                      
           const totalPagesFromAPI =
             parseInt(card.querySelector("span.total-pages-display").textContent.match(/\d+/)[0]) || 1;
 
@@ -708,19 +710,15 @@
           const pageInput = card.querySelector("input[type='text']");
           const isAllPages = allPagesRadio && allPagesRadio.checked;
 
-          // 🔍 ถ้าเลือก "กำหนดเอง" → ต้อง validate
           if (!isAllPages) {
             const raw = pageInput.value.trim();
-
-            // ห้ามเว้นว่าง
             if (!raw) {
               const msg = langData.invalidPageInput.replace("{filename}", filename);
               alert(msg);
               pageInput.focus();
-              return; // ❌ stop submitPrint ทั้งฟังก์ชัน
+              return;
             }
 
-            // ใช้ฟังก์ชันเดิม validatePagesInput ตรวจ format + เลขเกิน max page
             const ok = validatePagesInput(pageInput, totalPagesFromAPI);
             if (!ok) {
               const msg = langData.invalidPageInput.replace("{filename}", filename);
@@ -762,7 +760,6 @@
       currentTotalPages = totalPages;
       currentPrinterLocation = printer.location_name;
 
-      // ถ้ายอดรวม = 0 → direct print (ไม่ gen QR)
       if (currentTotalAmount === 0) {
         const paymentViewEl = document.getElementById("payment-view");
         const configViewEl = document.getElementById("config-view");
@@ -804,7 +801,6 @@
         return;
       }
 
-      // มีค่าใช้จ่าย → QR flow
       try {
         const query = new URLSearchParams({
           amount: currentTotalAmount.toFixed(2),
@@ -815,12 +811,10 @@
         });
         const res = await fetch(`${API_BASE}/generate_qr?${query.toString()}`);
 
-        // ค่าเริ่มต้น
         displayPayAmount = currentTotalAmount;
         backendBaseAmount = currentTotalAmount;
         backendDiscount = 0;
 
-        // ดึงจาก header (ถ้ามี)
         const payAmountHeader = res.headers.get("X-Pay-Amount");
         const baseAmountHeader = res.headers.get("X-Base-Amount");
         const discountHeader = res.headers.get("X-Discount");
@@ -927,7 +921,7 @@
       clearInterval(countdownInterval);
       currentRefId = null; 
       isPaymentSuccessView = false;
-      hasSentPrintJob = false;   // ✅ reset
+      hasSentPrintJob = false;
 
       const langData = translations[isThai ? 'th' : 'en'];
       const configView = document.getElementById("config-view");
@@ -951,13 +945,11 @@
 
         console.log("[checkPaymentStatus] response:", data);
 
-        // TODO: ปรับ status ให้ตรงกับ backend เช่น "paid" / "success" / "completed"
         if (data.status === "paid" || data.status === "success" || data.status === "completed") {
           hasSentPrintJob = true;
           clearInterval(paymentCheckInterval);
           clearInterval(countdownInterval);
 
-          // ✅ เรียก backend เพื่อสั่งพิมพ์จริง
           try {
             await fetch(`${API_BASE}/pay_completed`, {
               method: "POST",
@@ -988,9 +980,10 @@
           }
 
           const footer = document.querySelector(".fixed-footer .max-w-xl");
+          // ✅ หลังชำระเงินสำเร็จ ให้ไปหน้า historys.html
           footer.innerHTML = `
-            <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
-              ${langData.backToHome}
+            <button id="go-history-btn" onclick="window.location.href='historys.html'" class="py-3 text-lg primary-btn w-full">
+              ${langData.checkHistory}
             </button>
           `;
         }
@@ -1017,7 +1010,6 @@
             </button>
           `;
         }
-        // ถ้า waiting → ปล่อย interval วิ่งต่อ
       } catch (err) {
         console.error("checkPayment error", err);
       }
@@ -1036,9 +1028,10 @@
         `;
 
         const footer = document.querySelector(".fixed-footer .max-w-xl");
+        // ✅ กรณีสลับภาษาในหน้าที่ชำระสำเร็จแล้ว ให้ปุ่มยังเป็นไปหน้า history
         footer.innerHTML = `
-          <button id="back-to-home-btn" onclick="window.location.href='index.html'" class="py-3 text-lg primary-btn w-full">
-            ${langData.backToHome}
+          <button id="go-history-btn" onclick="window.location.href='historys.html'" class="py-3 text-lg primary-btn w-full">
+            ${langData.checkHistory}
           </button>
         `;
       } else {
