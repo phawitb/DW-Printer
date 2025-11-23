@@ -515,7 +515,7 @@ async def pay_completed(request: Request):
     try:
         data = await request.json()
         ref_id = data.get("ref_id")
-        status = data.get("status", "paid")
+        status = data.get("status", "paid")  # ส่วนใหญ่จะเป็น "paid"
         line_id = data.get("line_id")
         printer_id = data.get("printer_id")
         total_amount = data.get("total_amount", 0)
@@ -527,9 +527,11 @@ async def pay_completed(request: Request):
 
         print(f"🔔 Received pay_completed for ref_id={ref_id}, status={status}")
 
+        # ----- 1) หา / สร้าง payment doc ใน Mongo ก่อน -----
         doc = collection_payment.find_one({"ref_id": ref_id})
 
         if not doc:
+            # กรณี direct (ไม่มี generate_qr มาก่อน)
             payment_doc = {
                 "ref_id": ref_id,
                 "line_id": line_id,
@@ -537,23 +539,38 @@ async def pay_completed(request: Request):
                 "jobs": jobs,
                 "total_amount": total_amount,
                 "total_pages": total_pages,
-                "status": status,
+                "status": status,   # "paid"
                 "created_at": datetime.utcnow(),
-                "completed_at": datetime.utcnow(),
+                "completed_at": None,
                 "payment_type": "direct",
             }
             collection_payment.insert_one(payment_doc)
             doc = payment_doc
             print("🆕 Created new payment doc for direct print:", payment_doc)
-
         else:
+            # กรณีเคย create ไว้แล้วตอน generate_qr
+            # อัปเดตสถานะให้เป็น "paid" และเก็บเวลาที่ได้การแจ้งเตือนจ่ายเสร็จ
             collection_payment.update_one(
                 {"ref_id": ref_id},
-                {"$set": {"status": status, "completed_at": datetime.utcnow()}},
+                {
+                    "$set": {
+                        "status": status,  # ส่วนใหญ่คือ "paid"
+                        "completed_at": datetime.utcnow(),
+                        # เผื่อส่ง total_amount/total_pages มาจาก gateway ให้ sync ไว้ด้วย
+                        "total_amount": total_amount or doc.get("total_amount", 0),
+                        "total_pages": total_pages or doc.get("total_pages", 0),
+                    }
+                },
             )
-            doc.update({"status": status})
+            doc.update(
+                {
+                    "status": status,
+                    "total_amount": total_amount or doc.get("total_amount", 0),
+                    "total_pages": total_pages or doc.get("total_pages", 0),
+                }
+            )
 
-        # ✅ Push LINE ด้วย Flex card แทนข้อความธรรมดา
+        # ----- 2) ส่ง LINE Flex แจ้งว่า "การสั่งพิมพ์ถูกยืนยันแล้ว" (ไม่เกี่ยวกับการพิมพ์เสร็จ) -----
         if line_id:
             try:
                 history_url = f"{FRONTEND_BASE_URL}/historys.html"
@@ -576,7 +593,7 @@ async def pay_completed(request: Request):
                             },
                             {
                                 "type": "text",
-                                "text": "ระบบได้รับการชำระเงินเรียบร้อยแล้ว และกำลังดำเนินการพิมพ์ให้คุณ",
+                                "text": "ระบบได้รับการชำระเงินเรียบร้อยแล้ว และกำลังเตรียมส่งงานไปยังเครื่องพิมพ์",
                                 "size": "sm",
                                 "color": "#666666",
                                 "wrap": True,
@@ -645,38 +662,73 @@ async def pay_completed(request: Request):
             except Exception as e:
                 print("⚠️ LINE push error:", e)
 
-        pdf_dir = os.path.join(PDF_DIR, doc["line_id"])
-        upload_failed = False
-        for job in doc["jobs"]:
-            pdf_file = os.path.join(pdf_dir, job["filename"])
-            ok, msg = send_to_printer(pdf_file, doc)
-            print("🖨 Send to printer:", pdf_file, ok, msg)
+        # ----- 3) สร้าง background worker สำหรับส่งไฟล์เข้าเครื่องพิมพ์ -----
+        def _print_worker(payment_doc: dict):
+            try:
+                print(f"🖨 [WORKER] Start sending print jobs for ref_id={ref_id}")
+                pdf_dir = os.path.join(PDF_DIR, payment_doc["line_id"])
+                upload_failed = False
 
-            if not ok:
-                upload_failed = True
+                for job in payment_doc.get("jobs", []):
+                    pdf_file = os.path.join(pdf_dir, job["filename"])
+                    ok, msg = send_to_printer(pdf_file, payment_doc)
+                    print("🖨 [WORKER] Send to printer:", pdf_file, ok, msg)
+
+                    if not ok:
+                        upload_failed = True
+                        collection_payment.update_one(
+                            {"ref_id": ref_id},
+                            {
+                                "$set": {
+                                    "status": "uploadfail",
+                                    "completed_at": datetime.utcnow(),
+                                    "upload_failed_at": datetime.utcnow(),
+                                    "upload_error": msg,
+                                }
+                            },
+                        )
+                        break
+
+                if not upload_failed:
+                    collection_payment.update_one(
+                        {"ref_id": ref_id},
+                        {
+                            "$set": {
+                                "status": "uploaded",
+                                "completed_at": datetime.utcnow(),
+                            }
+                        },
+                    )
+                print(f"🖨 [WORKER] Done for ref_id={ref_id}, upload_failed={upload_failed}")
+            except Exception as e:
+                print(f"❌ [WORKER] Error in print worker for ref_id={ref_id}: {e}")
                 collection_payment.update_one(
                     {"ref_id": ref_id},
                     {
                         "$set": {
                             "status": "uploadfail",
                             "completed_at": datetime.utcnow(),
+                            "upload_error": str(e),
                         }
                     },
                 )
-                break
 
-        if upload_failed:
-            return {"status": "error", "message": "Upload to printer failed"}
-        else:
-            collection_payment.update_one(
-                {"ref_id": ref_id},
-                {"$set": {"status": "uploaded", "completed_at": datetime.utcnow()}},
-            )
-            return {"status": "ok", "message": "Payment updated and print job submitted."}
+        # run worker แบบไม่บล็อก response
+        threading.Thread(target=_print_worker, args=(doc,), daemon=True).start()
+
+        # ----- 4) ตอบกลับเร็ว ๆ ว่า "โอเคแล้ว" -----
+        # จุดนี้ payment_status = paid แล้ว → check_payment เห็นทันที
+        return {
+            "status": "ok",
+            "message": "Payment recorded, printing started in background.",
+            "ref_id": ref_id,
+            "payment_status": status,
+        }
 
     except Exception as e:
         print(f"❌ Error in pay_completed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/cancel_payment/{ref_id}")

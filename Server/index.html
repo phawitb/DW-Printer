@@ -163,6 +163,44 @@
   </div>
 
   <script>
+    async function pollPayment(refId) {
+      try {
+        const res = await fetch(`/check_payment/${refId}`);
+        if (!res.ok) {
+          console.error("check_payment error:", res.status);
+          // ถ้า error ชั่วคราว ก็ลองใหม่รอบหน้า
+          setTimeout(() => pollPayment(refId), 2000);
+          return;
+        }
+
+        const data = await res.json();
+        console.log("check_payment:", data);
+
+        if (data.status === "paid" || data.status === "uploaded") {
+          // ✅ จ่ายเสร็จแล้ว → เด้งไปหน้า history / success
+          window.location.href = `/historys.html?ref_id=${refId}`;
+          return;
+        }
+
+        if (data.status === "cancelled" || data.status === "uploadfail") {
+          // ❌ จบแบบไม่ปกติ → แสดง error / ปิด QR
+          if (typeof showErrorState === "function") {
+            showErrorState(data.status);
+          } else {
+            alert("การชำระเงินไม่สำเร็จ: " + data.status);
+          }
+          return;
+        }
+
+        // ยังรออยู่ (waiting / pending) → เช็คใหม่อีกที
+        setTimeout(() => pollPayment(refId), 2000);
+      } catch (err) {
+        console.error("pollPayment error:", err);
+        // network มีปัญหา → ลองใหม่
+        setTimeout(() => pollPayment(refId), 2000);
+      }
+    }
+    
     // ===== CONFIG =====
     let API_BASE = "";
     let LIFF_ID  = "";
