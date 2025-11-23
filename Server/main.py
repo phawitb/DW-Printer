@@ -38,6 +38,8 @@ FRONTEND_BASE_URL = cfg["FRONTEND_BASE_URL"]
 MONGO_URL = cfg["MONGO_URL"]
 DB_NAME = "dimonwall"
 
+MODE_DISCOUNT = "none"
+
 # === UPDATED: base URL ของ Payment Gateway ใหม่ ===
 PAYMENT_API_BASE = cfg.get("PAYMENT_API_BASE", "https://lucky-pay.onrender.com")
 # ========= Payment Gateway health checker =========
@@ -324,6 +326,7 @@ def generate_qr(
             "amount": amount,
             "description": description,
             "user_id": line_id,   # <--- เพิ่มบรรทัดนี้
+            "discount": MODE_DISCOUNT
         }
 
         # ✅ ถ้ามี prompay_id จาก frontend ให้ส่งไปที่ Payment Gateway ด้วย
