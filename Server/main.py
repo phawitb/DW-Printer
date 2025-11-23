@@ -8,12 +8,9 @@ from pymongo import MongoClient, ReturnDocument
 from bson import ObjectId
 from pdf2image import convert_from_path
 from PyPDF2 import PdfReader
-# from pytz import timezone
-# from zoneinfo import ZoneInfo
-# from datetime import datetime, timedelta
-
 from zoneinfo import ZoneInfo
-
+import time
+import threading
 import base64
 import os
 import requests
@@ -26,7 +23,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlencode
-
 
 def load_config():
     path = Path(__file__).resolve().parent / "static" / "config.json"
@@ -44,6 +40,28 @@ DB_NAME = "dimonwall"
 
 # === UPDATED: base URL ของ Payment Gateway ใหม่ ===
 PAYMENT_API_BASE = cfg.get("PAYMENT_API_BASE", "https://lucky-pay.onrender.com")
+# ========= Payment Gateway health checker =========
+
+def payment_health_worker():
+    """
+    ยิง /health ไปที่ PAYMENT_API_BASE ทุก 5 นาที
+    เพื่อเช็คว่ายังตอบอยู่ (และช่วยกัน sleep ไม่ให้ dyno หนาวเกิน 😆)
+    """
+    url = f"{PAYMENT_API_BASE.rstrip('/')}/health"
+    while True:
+        try:
+            r = requests.get(url, timeout=5)
+            try:
+                txt = r.text[:200]  # กัน log ยาวไป
+            except Exception:
+                txt = "<no text>"
+
+            print(f"[PAYMENT_HEALTH] {url} -> {r.status_code} {txt}")
+        except Exception as e:
+            print(f"[PAYMENT_HEALTH] ERROR: {e}")
+
+        # พัก 5 นาที
+        time.sleep(300)
 
 client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
@@ -55,6 +73,17 @@ PDF_DIR = "pdfs"
 MAX_DISK_USAGE_MB = cfg["MAX_DISK_USAGE_MB"]
 
 app = FastAPI()
+
+@app.on_event("startup")
+def start_payment_health_checker():
+    """
+    รันตอน FastAPI start ขึ้นมา
+    สร้าง background thread สำหรับ health check
+    """
+    t = threading.Thread(target=payment_health_worker, daemon=True)
+    t.start()
+    print("[PAYMENT_HEALTH] background worker started")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],        # หรือใส่ origin จริงที่ใช้
