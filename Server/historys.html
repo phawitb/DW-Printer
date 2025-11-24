@@ -289,7 +289,7 @@
       }
     }
 
-    // ✅ Progress card (ด้านบน) + logic หน้า x/x
+    // 🔧 map success-text → completed + อ่าน pages= จาก status
     function renderProgressCard(latestItem) {
       const container = document.getElementById("latest-progress");
       const langData = translations[isThai ? 'th' : 'en'];
@@ -305,7 +305,6 @@
 
       let rawStatus = latestItem.status ? latestItem.status.toString() : "";
       let normalizedStatus = rawStatus.trim().toLowerCase();
-      const totalPages = latestItem.total_pages || 0;
 
       // 1) live status text -> printing
       if (
@@ -330,25 +329,7 @@
       else if (normalizedStatus === "printing") stepIndex = 3;
       else if (normalizedStatus === "completed" || normalizedStatus === "finished") stepIndex = 4;
 
-      // 🔢 หน้า x/x
-      let pageProgressText = "";
-      const statusStr = latestItem.status ? latestItem.status.toString() : "";
-      const pageMatch = statusStr.match(/pages\s*=\s*(\d+)/i);
-      if (pageMatch && totalPages > 0) {
-        // กรณีกำลังพิมพ์ มี pages= จาก RPi
-        const printed = parseInt(pageMatch[1], 10);
-        if (!isNaN(printed)) {
-          let currentPage = Math.min(printed + 1, totalPages);
-          if (currentPage < 1) currentPage = 1;
-          pageProgressText = `${langData.pageProgress} ${currentPage}/${totalPages}`;
-        }
-      } else if (
-        (normalizedStatus === "completed" || normalizedStatus === "finished") &&
-        totalPages > 0
-      ) {
-        // ✅ ถ้าสำเร็จแล้ว แต่ไม่มี pages= ใน status → ใช้ หน้า total/total
-        pageProgressText = `${langData.pageProgress} ${totalPages}/${totalPages}`;
-      }
+      const totalPages = latestItem.total_pages || 0;
 
       // summary filenames
       let fileSummary = "-";
@@ -357,6 +338,20 @@
         if (names.length > 0) {
           fileSummary = names.slice(0, 2).join(", ");
           if (names.length > 2) fileSummary += " ...";
+        }
+      }
+
+      // current page progress from "pages=X"
+      let pageProgressText = "";
+      const statusStr = latestItem.status ? latestItem.status.toString() : "";
+      const pageMatch = statusStr.match(/pages\s*=\s*(\d+)/i);
+      if (pageMatch && totalPages > 0) {
+        const printed = parseInt(pageMatch[1], 10);
+        if (!isNaN(printed)) {
+          let currentPage = printed;
+          if (currentPage < 1) currentPage = 1;
+          if (currentPage > totalPages) currentPage = totalPages;
+          pageProgressText = `${langData.pageProgress} ${currentPage}/${totalPages}`;
         }
       }
 
@@ -378,7 +373,6 @@
         else if (idx === stepIndex) cls += " progress-step-active";
 
         let labelText = st.label;
-        // 🔽 step "กำลังพิมพ์" แปะ หน้า x/x ทั้งตอนกำลังพิมพ์ และตอน completed แล้ว
         if (idx === 3 && pageProgressText) {
           labelText = `${st.label} ${pageProgressText}`;
         }
@@ -430,19 +424,12 @@
         if (data.history && data.history.length > 0) {
           data.history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-          // การ์ดคำสั่งล่าสุด (ใช้ทั้งหมด ไม่ filter เพื่อให้เห็น waiting/cancelled ด้วยถ้าเป็นล่าสุด)
+          // latest order card
           renderProgressCard(data.history[0]);
 
-          // 🔎 loop สร้าง list แต่ "ข้าม" waiting / cancelled
           data.history.forEach(item => {
             let rawStatus = item.status ? item.status.toString() : "";
             let normalizedStatus = rawStatus.trim().toLowerCase();
-
-            // 🚫 ซ่อนสถานะ ยกเลิก + รอการชำระเงิน ใน list ด้านล่าง
-            if (normalizedStatus === "waiting" || normalizedStatus === "cancelled") {
-              return; // ไม่สร้างการ์ด
-            }
-
             let statusText = "";
             let statusDetailText = "";
 
@@ -469,6 +456,11 @@
             // default
             else {
               statusText = getStatusText(rawStatus);
+            }
+
+            // 🔥 ซ่อนสถานะ "ยกเลิก" และ "รอการชำระเงิน" จาก list ด้านล่าง
+            if (normalizedStatus === 'waiting' || normalizedStatus === 'cancelled') {
+              return; // ข้ามไม่สร้าง card
             }
 
             const statusClass = `status-badge status-${normalizedStatus}`;
@@ -513,12 +505,6 @@
               </div>`;
             listDiv.appendChild(card);
           });
-
-          // ถ้าทุกรายการโดน filter จนไม่เหลือเลย
-          if (!listDiv.hasChildNodes()) {
-            listDiv.innerHTML = `<p class="text-center text-gray-500 text-sm">${langData.noHistory}</p>`;
-          }
-
         } else {
           listDiv.innerHTML = `<p class="text-center text-gray-500 text-sm">${langData.noHistory}</p>`;
         }
