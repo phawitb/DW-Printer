@@ -289,6 +289,7 @@
       }
     }
 
+    // 🔧 แก้ฟังก์ชันนี้ให้ map success-text → completed
     function renderProgressCard(latestItem) {
       const container = document.getElementById("latest-progress");
       const langData = translations[isThai ? 'th' : 'en'];
@@ -305,7 +306,7 @@
       let rawStatus = latestItem.status ? latestItem.status.toString() : "";
       let normalizedStatus = rawStatus.trim().toLowerCase();
 
-      // live status string from printer (file..., [JOB..], pages=..)
+      // 1) live status text -> printing
       if (
         normalizedStatus.startsWith("file") ||
         normalizedStatus.includes("[job") ||
@@ -313,6 +314,13 @@
         normalizedStatus.includes("state=processing")
       ) {
         normalizedStatus = "printing";
+      }
+      // 2) success text -> completed
+      else if (
+        normalizedStatus.includes("all files printed successfully") ||
+        normalizedStatus.includes("completed successfully")
+      ) {
+        normalizedStatus = "completed";
       }
 
       let stepIndex = 0;
@@ -323,7 +331,7 @@
 
       const totalPages = latestItem.total_pages || 0;
 
-      // summary of filenames (for meta line)
+      // summary filenames
       let fileSummary = "-";
       if (latestItem.jobs && latestItem.jobs.length > 0) {
         const names = latestItem.jobs.map(j => j.filename).filter(Boolean);
@@ -340,7 +348,6 @@
       if (pageMatch && totalPages > 0) {
         const printed = parseInt(pageMatch[1], 10);
         if (!isNaN(printed)) {
-          // assume pages = already printed ⇒ current = printed + 1
           let currentPage = Math.min(printed + 1, totalPages);
           if (currentPage < 1) currentPage = 1;
           pageProgressText = `${langData.pageProgress} ${currentPage}/${totalPages}`;
@@ -364,10 +371,9 @@
         if (idx < stepIndex) cls += " progress-step-done";
         else if (idx === stepIndex) cls += " progress-step-active";
 
-        // ถ้าเป็น step กำลังพิมพ์ และมีหน้า x/x ให้ต่อเป็นคำเดียวกัน
         let labelText = st.label;
         if (idx === 3 && pageProgressText) {
-          labelText = `${st.label} ${pageProgressText}`;   // เช่น "กำลังพิมพ์ หน้า 1/8"
+          labelText = `${st.label} ${pageProgressText}`;
         }
 
         stepsHtml += `
@@ -376,7 +382,6 @@
             <div>${labelText}</div>
           </div>`;
       });
-
 
       const refTail = (latestItem.ref_id || "").toString().slice(-6) || "-";
 
@@ -418,7 +423,7 @@
         if (data.history && data.history.length > 0) {
           data.history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-          // การ์ดคำสั่งล่าสุด
+          // latest order card
           renderProgressCard(data.history[0]);
 
           data.history.forEach(item => {
@@ -427,7 +432,7 @@
             let statusText = "";
             let statusDetailText = "";
 
-            // mapping live printer text -> printing
+            // 1) live printer text -> printing
             if (
               normalizedStatus.startsWith("file") ||
               normalizedStatus.includes("[job") ||
@@ -437,7 +442,18 @@
               normalizedStatus = "printing";
               statusText = getStatusText("printing");
               statusDetailText = rawStatus;
-            } else {
+            }
+            // 2) success text -> completed
+            else if (
+              normalizedStatus.includes("all files printed successfully") ||
+              normalizedStatus.includes("completed successfully")
+            ) {
+              normalizedStatus = "completed";
+              statusText = getStatusText("completed");
+              statusDetailText = rawStatus;
+            }
+            // default
+            else {
               statusText = getStatusText(rawStatus);
             }
 
