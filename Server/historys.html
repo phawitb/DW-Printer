@@ -301,6 +301,7 @@
       if (!created) return;
 
       const diffMin = (now - created) / 60000;
+      // แสดงเฉพาะคำสั่งที่ไม่เกิน 10 ชม. (พอแล้วสำหรับงานพิมพ์)
       if (diffMin > 600) return;
 
       let rawStatus = latestItem.status ? latestItem.status.toString() : "";
@@ -341,16 +342,20 @@
         }
       }
 
-      // current page progress from "pages=X"
+      // current page progress from "pages=X" (global page จาก Pi)
       let pageProgressText = "";
       const statusStr = latestItem.status ? latestItem.status.toString() : "";
       const pageMatch = statusStr.match(/pages\s*=\s*(\d+)/i);
       if (pageMatch && totalPages > 0) {
         const printed = parseInt(pageMatch[1], 10);
         if (!isNaN(printed)) {
-          let currentPage = printed;
+          let currentPage = printed;   // global page: 1..total
           if (currentPage < 1) currentPage = 1;
           if (currentPage > totalPages) currentPage = totalPages;
+          // ถ้างานเสร็จแล้ว แต่ค่า printed เล็กกว่า total (กรณีใด ๆ) บังคับให้เป็น total
+          if (normalizedStatus === "completed" || normalizedStatus === "finished") {
+            currentPage = totalPages;
+          }
           pageProgressText = `${langData.pageProgress} ${currentPage}/${totalPages}`;
         }
       }
@@ -422,10 +427,17 @@
         document.getElementById("latest-progress").innerHTML = "";
 
         if (data.history && data.history.length > 0) {
+          // sort ใหม่: ล่าสุดอยู่บน
           data.history.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-          // latest order card
-          renderProgressCard(data.history[0]);
+          // ✅ หา order ล่าสุดที่ไม่ใช่ waiting / cancelled / uploadfail มาแสดง progress card
+          const latestForProgress = data.history.find(item => {
+            const st = (item.status || "").toString().trim().toLowerCase();
+            return st !== "waiting" && st !== "cancelled" && st !== "uploadfail";
+          });
+          if (latestForProgress) {
+            renderProgressCard(latestForProgress);
+          }
 
           data.history.forEach(item => {
             let rawStatus = item.status ? item.status.toString() : "";
@@ -458,8 +470,12 @@
               statusText = getStatusText(rawStatus);
             }
 
-            // 🔥 ซ่อนสถานะ "ยกเลิก" และ "รอการชำระเงิน" จาก list ด้านล่าง
-            if (normalizedStatus === 'waiting' || normalizedStatus === 'cancelled') {
+            // 🔥 ซ่อนสถานะ "ยกเลิก" / "รอชำระ" / "อัปโหลดล้มเหลว" ในรายการด้านล่าง
+            if (
+              normalizedStatus === 'waiting' ||
+              normalizedStatus === 'cancelled' ||
+              normalizedStatus === 'uploadfail'
+            ) {
               return; // ข้ามไม่สร้าง card
             }
 
