@@ -1106,6 +1106,39 @@ def get_config_authen_alias():
         "node_authen": doc.get("node_authen", {}),
     }
 
+@app.post("/update_cups_url")
+def update_cups_url(
+    printer_id: str = Form(...),
+    url: str = Form(...),
+):
+    """
+    อัปเดต CUPS URL ของเครื่องพิมพ์ (เช่น https://xxxx.trycloudflare.com ที่ proxy ไปยัง :631)
+    - แยกจาก url หลัก (API) เพื่อให้เก็บได้ทั้งสองค่า
+    """
+    try:
+        now = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
+
+        res = collection_printer.find_one_and_update(
+            {"printer_id": printer_id},
+            {
+                "$setOnInsert": {"created_at": now, "name": printer_id},
+                # เก็บเป็นฟิลด์ใหม่ชื่อ cups_url
+                "$set": {
+                    "cups_url": url,
+                    "last_seen": now,
+                },
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+
+        return {
+            "status": "ok",
+            "printer": {k: v for k, v in res.items() if k != "_id"},
+        }
+    except Exception as e:
+        print(f"❌ Error in update_cups_url: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/update_printer_url")
 def update_printer_url(
