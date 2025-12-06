@@ -51,8 +51,27 @@
       </div>
 
       <div>
-        <label class="block text-lg font-semibold">URL</label>
+        <label class="block text-lg font-semibold">URL (API / Node)</label>
         <input id="url" class="border px-4 py-3 w-full rounded-lg bg-gray-200 text-gray-500" disabled>
+      </div>
+
+      <!-- ✅ NEW: CUPS URL + ปุ่มตั้งค่าเครื่องพิมพ์ -->
+      <div>
+        <label class="block text-lg font-semibold">CUPS URL</label>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <input id="cups_url"
+                 class="border px-4 py-3 w-full rounded-lg bg-gray-200 text-gray-500"
+                 placeholder="รอเครื่องออนไลน์เพื่อรับ CUPS URL"
+                 disabled>
+          <button type="button"
+                  onclick="openCups()"
+                  class="bg-amber-600 text-white px-4 py-3 rounded-lg text-sm sm:text-base font-semibold hover:bg-amber-700 transition w-full sm:w-auto">
+            ตั้งค่าเครื่องพิมพ์
+          </button>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">
+          ลิงก์ไปหน้า CUPS ของเครื่องพิมพ์ (ใช้เพิ่ม/แก้ printer, driver ฯลฯ)
+        </p>
       </div>
 
       <!-- Select default/selected printer from list_printers -->
@@ -178,7 +197,18 @@
     }
 
     function fillSimpleFields(data) {
-      const keys = ["location_name","lat","lon","url","bw_price","color_price","bw_only","open_time","close_time"];
+      const keys = [
+        "location_name",
+        "lat",
+        "lon",
+        "url",
+        "cups_url",      // ✅ new
+        "bw_price",
+        "color_price",
+        "bw_only",
+        "open_time",
+        "close_time"
+      ];
       for (const key of keys) {
         const el = document.getElementById(key);
         if (!el) continue;
@@ -346,7 +376,7 @@
       const spinner = `
         <svg class="animate-spin h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+          <path class="opacity-75" fill="currentColor" stroke="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>`;
       const check = `
         <svg class="h-8 w-8 text-green-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -424,6 +454,28 @@
       const u = (document.getElementById('url')?.value || '').trim();
       if (u && /^https?:\/\//.test(u)) return u.replace(/\/+$/,'');
       return "";
+    }
+
+    // ✅ NEW: เปิด CUPS URL ในแท็บใหม่
+    function openCups(){
+      const cups = (document.getElementById('cups_url')?.value || '').trim();
+      if (!cups){
+        showLoadingOverlay(true);
+        setOverlayState(
+          'error',
+          'ยังไม่มี CUPS URL',
+          'กรุณาเช็คว่าเครื่องออนไลน์และระบบสร้าง tunnel แล้ว หรือกดโหลดข้อมูลเครื่องใหม่อีกครั้ง'
+        );
+        return;
+      }
+
+      try {
+        const target = /^https?:\/\//.test(cups) ? cups : `https://${cups}`;
+        window.open(target, '_blank');
+      } catch(e){
+        showLoadingOverlay(true);
+        setOverlayState('error', 'เปิดหน้า CUPS ไม่สำเร็จ', String(e));
+      }
     }
 
     // ===== NEW: Queue render =====
