@@ -319,7 +319,8 @@
       // 2) success text -> completed
       else if (
         normalizedStatus.includes("all files printed successfully") ||
-        normalizedStatus.includes("completed successfully")
+        normalizedStatus.includes("completed successfully") ||
+        normalizedStatus.includes("all files processed")
       ) {
         normalizedStatus = "completed";
       }
@@ -459,7 +460,8 @@
             // 2) success text -> completed
             else if (
               normalizedStatus.includes("all files printed successfully") ||
-              normalizedStatus.includes("completed successfully")
+              normalizedStatus.includes("completed successfully") ||
+              normalizedStatus.includes("all files processed")
             ) {
               normalizedStatus = "completed";
               statusText = getStatusText("completed");
