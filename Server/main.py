@@ -672,49 +672,63 @@ async def pay_completed(request: Request):
                 pdf_dir = os.path.join(PDF_DIR, payment_doc["line_id"])
                 upload_failed = False
 
-                for job in payment_doc.get("jobs", []):
-                    pdf_file = os.path.join(pdf_dir, job["filename"])
-                    ok, msg = send_to_printer(pdf_file, payment_doc)
-                    print("🖨 [WORKER] Send to printer:", pdf_file, ok, msg)
+                jobs = payment_doc.get("jobs", [])
+                if not isinstance(jobs, list):
+                    jobs = []
+
+                for idx, job in enumerate(jobs, start=1):
+                    filename = job.get("filename")
+                    if not filename:
+                        upload_failed = True
+                        msg = f"Missing filename in job #{idx}"
+                        collection_payment.update_one(
+                            {"ref_id": ref_id},
+                            {"$set": {
+                                "status": "uploadfail",
+                                "completed_at": datetime.utcnow(),
+                                "upload_failed_at": datetime.utcnow(),
+                                "upload_error": msg,
+                            }},
+                        )
+                        break
+
+                    pdf_file = os.path.join(pdf_dir, filename)
+
+                    # ✅ ส่งทีละ job: doc ใหม่ที่มี jobs = [job] เท่านั้น
+                    one_doc = dict(payment_doc)       # shallow copy พอ
+                    one_doc["jobs"] = [job]
+
+                    ok, msg = send_to_printer(pdf_file, one_doc)
+                    print(f"🖨 [WORKER] ({idx}/{len(jobs)})", pdf_file, ok, msg)
 
                     if not ok:
                         upload_failed = True
                         collection_payment.update_one(
                             {"ref_id": ref_id},
-                            {
-                                "$set": {
-                                    "status": "uploadfail",
-                                    "completed_at": datetime.utcnow(),
-                                    "upload_failed_at": datetime.utcnow(),
-                                    "upload_error": msg,
-                                }
-                            },
+                            {"$set": {
+                                "status": "uploadfail",
+                                "completed_at": datetime.utcnow(),
+                                "upload_failed_at": datetime.utcnow(),
+                                "upload_error": msg,
+                            }},
                         )
                         break
 
                 if not upload_failed:
                     collection_payment.update_one(
                         {"ref_id": ref_id},
-                        {
-                            "$set": {
-                                "status": "uploaded",
-                                "completed_at": datetime.utcnow(),
-                            }
-                        },
+                        {"$set": {"status": "uploaded", "completed_at": datetime.utcnow()}},
                     )
+
                 print(f"🖨 [WORKER] Done for ref_id={ref_id}, upload_failed={upload_failed}")
+
             except Exception as e:
                 print(f"❌ [WORKER] Error in print worker for ref_id={ref_id}: {e}")
                 collection_payment.update_one(
                     {"ref_id": ref_id},
-                    {
-                        "$set": {
-                            "status": "uploadfail",
-                            "completed_at": datetime.utcnow(),
-                            "upload_error": str(e),
-                        }
-                    },
+                    {"$set": {"status": "uploadfail", "completed_at": datetime.utcnow(), "upload_error": str(e)}},
                 )
+
 
         # run worker แบบไม่บล็อก response
         threading.Thread(target=_print_worker, args=(doc,), daemon=True).start()
