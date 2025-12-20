@@ -92,7 +92,7 @@ PDF_DIR = "pdfs"
 MAX_DISK_USAGE_MB = int(cfg["MAX_DISK_USAGE_MB"])
 
 # ✅ TTL / Maintenance
-PDF_TTL_HOURS = int(cfg.get("PDF_TTL_HOURS", 24))  # default 24h
+PDF_TTL_HOURS = int(cfg.get("PDF_TTL_HOURS", 1))  # default 24h
 MAINTENANCE_INTERVAL_SEC = int(cfg.get("MAINTENANCE_INTERVAL_SEC", 600))  # default 10 นาที
 
 
