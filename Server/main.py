@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Query, HTTPException
+from fastapi import FastAPI, Request, Query, HTTPException, Form
 from fastapi.responses import JSONResponse, Response, StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,8 +17,8 @@ import json
 from pytz import timezone
 from pathlib import Path
 from datetime import datetime, timedelta
-from fastapi import UploadFile, File, Form
-
+from fastapi import UploadFile, File, Form, Header
+from zoneinfo import ZoneInfo
 
 def load_config():
     path = Path(__file__).resolve().parent / "static" / "config.json"
@@ -37,6 +37,7 @@ client = MongoClient(MONGO_URL)
 db = client[DB_NAME]
 collection_printer = db["printers"]
 collection_payment = db["payment_historys"]
+collection_config = db["config"]
 
 PDF_DIR = "pdfs"
 MAX_DISK_USAGE_MB = cfg["MAX_DISK_USAGE_MB"]
@@ -186,20 +187,40 @@ def get_latest_url(printer_id: str):
         return doc.get("url"), doc.get("timestamp")
     return None, None
 
-def send_to_printer(PDF_FILE: str, UID: str, printer_id: str):
-    printer_url, ts = get_latest_url(printer_id)
-    print(f"Latest URL for {printer_id} @ {ts} => {printer_url}")
+def send_to_printer(PDF_FILE: str, doc: dict):
+    printer_url, ts = get_latest_url(doc['printer_id'])
+    print(f"Latest URL for {doc['printer_id']} @ {ts} => {printer_url}")
     if not printer_url:
         return False, "No printer URL"
-    API_URL = f"{printer_url}/upload-pdf"
+
+    api_url = f"{printer_url.rstrip('/')}/upload-pdf"
+
     try:
         with open(PDF_FILE, "rb") as f:
-            files = {"file": (os.path.basename(PDF_FILE), f, "application/pdf")}
-            data = {"uid": UID}
-            r = requests.post(API_URL, files=files, data=data, timeout=30)
-        return r.status_code == 200, r.text
-    except Exception as e:
-        return False, str(e)
+            files = {
+                "file": (os.path.basename(PDF_FILE), f, "application/pdf")
+            }
+            # IMPORTANT: backend expects `doc` as a *string* form field
+            data = {
+                "doc": json.dumps(doc, ensure_ascii=False, default=str)
+            }
+
+            r = requests.post(
+                api_url,
+                files=files,
+                data=data,              # form fields
+                timeout=(10, 40)        # (connect, read) seconds
+            )
+
+        ok = r.ok
+        # Return more informative text if not 2xx
+        text = r.text if ok else f"HTTP {r.status_code}: {r.text}"
+        return ok, text
+
+    except requests.exceptions.RequestException as e:
+        return False, f"Request error: {e}"
+    except OSError as e:
+        return False, f"File error: {e}"
 
 # --- Distance helpers for get_all_printer sorting ---
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -354,7 +375,7 @@ async def pay_completed(request: Request):
         upload_failed = False
         for job in doc["jobs"]:
             pdf_file = os.path.join(pdf_dir, job["filename"])
-            ok, msg = send_to_printer(pdf_file, doc["line_id"], doc["printer_id"])
+            ok, msg = send_to_printer(pdf_file, doc)
             print("🖨 Send to printer:", pdf_file, ok, msg)
 
             if not ok:
@@ -763,6 +784,21 @@ def get_config():
         return {"frontend": {"use_payment": "True"}}  # ค่า default
     return {"frontend": doc.get("frontend", {})}
 
+@app.get("/get_config_authen")
+def get_config():
+    collection_config = db["config"]
+    doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")}, {"_id": 0})
+    if not doc:
+        return {
+            "frontend": {"use_payment": "True"},
+            "node_authen": {}
+        }
+    return {
+        "frontend": doc.get("frontend", {}),
+        "node_authen": doc.get("node_authen", {})
+    }
+
+
 
 @app.post("/update_printer_url")
 def update_printer_url(
@@ -783,3 +819,329 @@ def update_printer_url(
     except Exception as e:
         print(f"❌ Error in update_printer_url: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Serve manage.html ===
+# === Serve manage.html ===
+@app.get("/manage.html")
+def serve_manage():
+    return FileResponse(os.path.join(os.path.dirname(__file__), "manage.html"))
+
+# === Permission Helper ===
+def check_permission(line_id: str, printer_id: str) -> bool:
+    """ตรวจสอบสิทธิ์การเข้าถึง printer ตาม rule ใหม่:
+       - admin → เข้าได้ทุกเครื่อง
+       - printer_id ไม่มีใน node_authen → เข้าได้
+       - printer_id มี แต่ [] → เข้าได้
+       - printer_id มี และ list ไม่ว่าง → ต้องมี line_id อยู่ใน list
+    """
+    doc = collection_config.find_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")}
+    )
+    if not doc:
+        return False
+
+    node_authen = doc.get("node_authen", {})
+
+    # ✅ admin → list
+    admin_ids = node_authen.get("admin", [])
+    if isinstance(admin_ids, str):
+        admin_ids = [admin_ids]
+    if line_id in admin_ids:
+        return True
+
+    # ✅ ถ้า printer_id ไม่มี key → เข้าได้ทุกคน
+    if printer_id not in node_authen:
+        print(f"ℹ️ Printer {printer_id} not found in node_authen → allow all")
+        return True
+
+    assigned_ids = node_authen.get(printer_id, [])
+    if isinstance(assigned_ids, str):
+        assigned_ids = [assigned_ids]
+
+    # ✅ ถ้าเป็น [] → เข้าได้ไม่จำกัด
+    if not assigned_ids:
+        print(f"ℹ️ Printer {printer_id} has empty list → allow all")
+        return True
+
+    # ✅ ถ้า line_id อยู่ใน list → ผ่าน
+    if line_id in assigned_ids:
+        return True
+
+    # ❌ อื่น ๆ → Forbidden
+    print(f"🚫 Permission denied for {line_id} on {printer_id}")
+    return False
+
+
+
+
+
+# === API: Get Printer ===
+@app.get("/get_printer/{printer_id}")
+def get_printer(printer_id: str, x_line_uid: str = Header(...)):
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    doc = collection_printer.find_one({"printer_id": printer_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    return doc
+
+
+# === API: Update Printer ===
+@app.post("/update_printer/{printer_id}")
+async def update_printer(
+    printer_id: str, 
+    request: Request, 
+    x_line_uid: str = Header(...)
+):
+    # ✅ ตรวจสิทธิ์
+    if not check_permission(x_line_uid, printer_id):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    # ✅ อ่าน payload
+    data = await request.json()
+
+    # ✅ update printer data
+    result = collection_printer.update_one(
+        {"printer_id": printer_id},
+        {"$set": data}
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    # ✅ update node_authen mapping เป็น list
+    collection_config.update_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")},
+        {"$addToSet": {f"node_authen.{printer_id}": x_line_uid}}
+    )
+
+    return {
+        "status": "ok",
+        "message": f"Updated printer {printer_id} and node_authen",
+        "uid": x_line_uid
+    }
+
+
+# === API: Get Config Authen ===
+@app.get("/get_config_authen")
+def get_config_authen():
+    """ดึงค่า config ทั้ง frontend และ node_authen (เป็น list เสมอ)"""
+    collection_config = db["config"]
+    doc = collection_config.find_one({"_id": ObjectId("68ab0f1c4db5106f558a97a4")}, {"_id": 0})
+    if not doc:
+        return {
+            "frontend": {"use_payment": "True"},
+            "node_authen": {}
+        }
+
+    node_authen = doc.get("node_authen", {})
+    # ✅ ensure ทุกค่าเป็น list
+    fixed_authen = {}
+    for k, v in node_authen.items():
+        if isinstance(v, str):
+            fixed_authen[k] = [v]
+        elif isinstance(v, list):
+            fixed_authen[k] = v
+        else:
+            fixed_authen[k] = []
+
+    return {
+        "frontend": doc.get("frontend", {}),
+        "node_authen": fixed_authen
+    }
+
+
+# === API: Debug Authen ===
+@app.get("/debug_authen")
+def debug_authen():
+    """ตรวจสอบ node_authen ล่าสุดจาก MongoDB (คืนค่าเป็น list เสมอ)"""
+    doc = collection_config.find_one(
+        {"_id": ObjectId("68ab0f1c4db5106f558a97a4")},
+        {"node_authen": 1, "_id": 0}
+    )
+
+    node_authen = doc.get("node_authen", {}) if doc else {}
+    fixed_authen = {}
+    for k, v in node_authen.items():
+        if isinstance(v, str):
+            fixed_authen[k] = [v]
+        elif isinstance(v, list):
+            fixed_authen[k] = v
+        else:
+            fixed_authen[k] = []
+
+    return {"node_authen": fixed_authen}
+
+
+
+
+@app.post("/update_printer_status/{printer_id}")
+def update_printer_status(
+    printer_id: str,
+    status: str = Form("online"),
+    last_seen: str = Form(None)   # 👈 client อาจส่งเวลามา หรือไม่ส่งก็ได้
+):
+    try:
+        if last_seen is None:
+            # ถ้า client ไม่ส่ง → ใช้เวลาประเทศไทยปัจจุบัน
+            last_seen = datetime.now(ZoneInfo("Asia/Bangkok")).strftime("%Y-%m-%d %H:%M:%S")
+
+        result = collection_printer.update_one(
+            {"printer_id": printer_id},
+            {"$set": {"last_seen": last_seen, "status": status}}
+        )
+
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail=f"Printer {printer_id} not found")
+
+        return {
+            "status": "ok",
+            "printer_id": printer_id,
+            "last_seen": last_seen,
+            "set_status": status
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === API: Get printer name/list from MongoDB ===
+@app.get("/get_printer_name/{printer_id}")
+def get_printer_name(printer_id: str):
+    """
+    ดึงชื่อเครื่องพิมพ์ที่เลือก (selected_printer) และรายการเครื่องพิมพ์ทั้งหมด (list_printers)
+    จากคอลเลกชัน dimonwall.printers ตาม printer_id ที่ส่งมา
+    รูปแบบผลลัพธ์:
+    {
+        "printer_id": "...",
+        "selected_printer": "PDF",
+        "list_printers": ["PDF", "EPSON1"]
+    }
+    """
+    doc = collection_printer.find_one(
+        {"printer_id": printer_id},
+        {"_id": 0, "selected_printer": 1, "list_printers": 1}
+    )
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    selected = doc.get("selected_printer")
+    plist = doc.get("list_printers", [])
+
+    # เผื่อกรณีใน DB เก็บเป็น string ให้แปลงเป็น list
+    if isinstance(plist, str):
+        # รองรับทั้งรูปแบบ "PDF,EPSON1" หรือ "['PDF','EPSON1']"
+        try:
+            # ลอง parse เป็น JSON ก่อน
+            parsed = json.loads(plist)
+            if isinstance(parsed, list):
+                plist = parsed
+            else:
+                raise ValueError
+        except Exception:
+            # fallback แยกด้วย comma
+            plist = [p.strip() for p in plist.split(",") if p.strip()]
+
+    return {
+        "printer_id": printer_id,
+        "selected_printer": selected,
+        "list_printers": plist
+    }
+    
+# === API: Update printer selected_printer / list_printers (no auth) ===
+@app.post("/update_printer_name/{printer_id}")
+async def update_printer_name(
+    printer_id: str,
+    request: Request
+):
+    """
+    อัปเดตฟิลด์ selected_printer และ/หรือ list_printers ของเครื่องพิมพ์ที่ระบุ
+    - ส่งอย่างใดอย่างหนึ่งหรือทั้งคู่ก็ได้
+    - ถ้าไม่ได้ส่งฟิลด์นั้นมา -> ไม่อัปเดตฟิลด์นั้น
+    Payload ตัวอย่าง:
+      {
+        "selected_printer": "PDF",
+        "list_printers": ["PDF", "EPSON1"]
+      }
+    หรือ
+      {
+        "list_printers": "PDF,EPSON1"
+      }
+    """
+    # ✅ หาเอกสารเดิม
+    current = collection_printer.find_one({"printer_id": printer_id})
+    if not current:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    # ✅ อ่าน payload
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    update_fields = {}
+
+    # --- selected_printer: อัปเดตเฉพาะกรณีส่งมาใน payload ---
+    if "selected_printer" in data:
+        sel = data.get("selected_printer")
+        if sel is not None:
+            if isinstance(sel, str):
+                sel = sel.strip()
+            update_fields["selected_printer"] = sel
+
+    # --- list_printers: อัปเดตเฉพาะกรณีส่งมาใน payload ---
+    if "list_printers" in data:
+        lp = data.get("list_printers")
+
+        def to_list(v):
+            if v is None:
+                return None
+            if isinstance(v, list):
+                return [str(x).strip() for x in v if str(x).strip() != ""]
+            if isinstance(v, str):
+                s = v.strip()
+                if s == "":
+                    return []
+                # ลอง parse JSON-string ก่อน
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip() != ""]
+                except Exception:
+                    pass
+                # fallback: คั่นด้วย comma
+                return [p.strip() for p in s.split(",") if p.strip() != ""]
+            return [str(v).strip()]
+
+        parsed_list = to_list(lp)
+        if parsed_list is not None:
+            update_fields["list_printers"] = parsed_list
+
+    if not update_fields:
+        return {
+            "status": "noop",
+            "message": "Nothing to update",
+            "printer_id": printer_id,
+            "selected_printer": current.get("selected_printer"),
+            "list_printers": current.get("list_printers", []),
+        }
+
+    # ✅ ทำการอัปเดต
+    result = collection_printer.update_one(
+        {"printer_id": printer_id},
+        {"$set": update_fields}
+    )
+
+    # อ่านค่าล่าสุดคืนให้ผู้เรียก
+    updated = collection_printer.find_one(
+        {"printer_id": printer_id},
+        {"_id": 0, "selected_printer": 1, "list_printers": 1}
+    )
+
+    return {
+        "status": "ok" if result.matched_count else "not_found",
+        "printer_id": printer_id,
+        "selected_printer": updated.get("selected_printer"),
+        "list_printers": updated.get("list_printers", []),
+        "updated_fields": list(update_fields.keys()),
+    }
